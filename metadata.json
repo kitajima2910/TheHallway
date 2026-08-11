@@ -1,0 +1,6 @@
+{
+  "name": "The Hallway",
+  "description": "A first-person 3D horror game built with Three.js",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
