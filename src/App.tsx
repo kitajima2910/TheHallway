@@ -2408,38 +2408,50 @@ export default function App() {
 
     const talismansList: {
         mesh: THREE.Mesh;
-        basePos: THREE.Vector3;
-        floatSpeed: number;
-        floatAmplitude: number;
-        driftSpeed: number;
-        rotSpeed: THREE.Vector3;
+        pos: THREE.Vector3;
+        velocity: THREE.Vector3;
+        rotVel: THREE.Vector3;
+        isGrounded: boolean;
+        isFalling: boolean;
+        flightTimer: number;
+        maxFlightTime: number;
+        groundTimer: number;
         phase: number;
         foldType: number;
+        driftSpeed: number;
     }[] = [];
 
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 8; i++) {
         const foldType = i % 3;
         const talismanGeo = createBentTalismanGeometry(foldType);
         const talismanMesh = new THREE.Mesh(talismanGeo, talismanMat);
-        const posX = (Math.random() - 0.5) * 4.2;
-        const posY = 0.6 + Math.random() * 1.8;
+        const posX = (Math.random() - 0.5) * (hallwayWidth - 0.6);
+        const posY = 1.0 + Math.random() * 1.5;
         const posZ = 3.0 - Math.random() * 68.0;
         talismanMesh.position.set(posX, posY, posZ);
         scene.add(talismanMesh);
 
         talismansList.push({
             mesh: talismanMesh,
-            basePos: new THREE.Vector3(posX, posY, posZ),
-            floatSpeed: 1.5 + Math.random() * 2.0,
-            floatAmplitude: 0.3 + Math.random() * 0.5,
-            driftSpeed: 1.5 + Math.random() * 3.0,
-            rotSpeed: new THREE.Vector3(
-                (Math.random() - 0.5) * 2.0,
-                (Math.random() - 0.5) * 3.0,
-                (Math.random() - 0.5) * 2.0
+            pos: new THREE.Vector3(posX, posY, posZ),
+            velocity: new THREE.Vector3(
+                (Math.random() - 0.5) * 1.0,
+                (Math.random() - 0.5) * 0.3,
+                1.5 + Math.random() * 2.5
             ),
+            rotVel: new THREE.Vector3(
+                (Math.random() - 0.5) * 1.5,
+                (Math.random() - 0.5) * 2.0,
+                (Math.random() - 0.5) * 1.5
+            ),
+            isGrounded: false,
+            isFalling: false,
+            flightTimer: 0,
+            maxFlightTime: 14.0 + Math.random() * 16.0,
+            groundTimer: 0,
             phase: Math.random() * Math.PI * 2,
-            foldType
+            foldType,
+            driftSpeed: 1.5 + Math.random() * 2.0
         });
     }
 
@@ -2687,29 +2699,107 @@ export default function App() {
           }
       }
 
-      // Update wind-blown flying talismans (Bùa chú uốn cong, gấp khúc, bay phấp phới tự nhiên như giấy thật)
+      // Update wind-blown flying talismans with graceful long flight, floating, wall collisions and gentle falling to the floor
+      const halfHall = hallwayWidth / 2 - 0.18;
+      const floorY = 0.03;
+      const ceilingY = hallwayHeight - 0.25;
+
       for (let i = 0; i < talismansList.length; i++) {
           const t = talismansList[i];
-          const pt = t.basePos;
-          
-          let currentZ = pt.z + (time * t.driftSpeed) % 70;
-          if (currentZ > 5) currentZ -= 75;
-          if (currentZ < -70) currentZ += 75;
 
-          const p = t.phase + time * t.floatSpeed;
-          
-          t.mesh.position.x = pt.x + Math.sin(p * 0.8) * 0.7 + Math.cos(time * 1.8 + i) * 0.25;
-          t.mesh.position.y = pt.y + Math.cos(p * 1.2) * 0.55 + Math.sin(time * 2.2 + i) * 0.2;
-          t.mesh.position.z = currentZ;
+          if (t.isGrounded) {
+              t.groundTimer += delta;
+              if (t.groundTimer > 8.0 + (i % 6) * 2.0) {
+                  t.isGrounded = false;
+                  t.isFalling = false;
+                  t.flightTimer = 0;
+                  t.maxFlightTime = 14.0 + Math.random() * 16.0;
+                  t.groundTimer = 0;
+                  t.pos.set(
+                      (Math.random() - 0.5) * (hallwayWidth - 0.6),
+                      1.2 + Math.random() * 1.5,
+                      camera.position.z - 30 - Math.random() * 25
+                  );
+                  t.velocity.set(
+                      (Math.random() - 0.5) * 1.0,
+                      (Math.random() - 0.5) * 0.3,
+                      t.driftSpeed
+                  );
+              }
+              continue;
+          }
 
-          t.mesh.rotation.x = Math.sin(time * 4.5 + i) * 0.7 + Math.sin(p) * 0.4;
-          t.mesh.rotation.y = Math.cos(time * 3.5 + i * 0.5) * 1.3 + p * 0.3;
-          t.mesh.rotation.z = Math.sin(time * 5.5 + i) * 0.8 + Math.cos(p * 1.5) * 0.7;
+          t.flightTimer += delta;
+          if (t.flightTimer >= t.maxFlightTime) {
+              t.isFalling = true;
+          }
 
-          // Realistic organic paper flutter pulse
-          const flutterX = 1.0 + Math.sin(time * 14.0 + i * 2.5) * 0.12;
-          const flutterY = 1.0 + Math.cos(time * 11.0 + i * 1.5) * 0.1;
-          t.mesh.scale.set(flutterX, flutterY, 1.0);
+          const p = t.phase + time * t.driftSpeed;
+          const windForceX = Math.sin(p * 0.8 + i) * 1.6;
+
+          if (!t.isFalling) {
+              // Graceful floating flight with gentle vertical lift/bobbing
+              const windForceY = Math.cos(p * 0.6 + i * 0.7) * 0.9;
+              t.velocity.x += (windForceX - t.velocity.x * 2.0) * delta;
+              t.velocity.y += (windForceY - t.velocity.y * 2.0) * delta;
+              t.velocity.z = t.driftSpeed + Math.sin(time * 1.5 + i) * 0.3;
+          } else {
+              // Falling down to floor gracefully
+              t.velocity.x += (windForceX * 0.5 - t.velocity.x * 1.0) * delta;
+              t.velocity.y -= 2.8 * delta; // gentle gravity
+              t.velocity.z = t.driftSpeed * 0.8;
+          }
+
+          t.pos.addScaledVector(t.velocity, delta);
+
+          if (t.pos.z > camera.position.z + 6) {
+              t.pos.z = camera.position.z - 50 - Math.random() * 20;
+              t.pos.x = (Math.random() - 0.5) * (hallwayWidth - 0.6);
+              t.pos.y = 1.2 + Math.random() * 1.5;
+              t.flightTimer = 0;
+              t.isFalling = false;
+          } else if (t.pos.z < camera.position.z - 65) {
+              t.pos.z = camera.position.z + 10 + Math.random() * 10;
+          }
+
+          if (t.pos.x > halfHall) {
+              t.pos.x = halfHall;
+              t.velocity.x = -Math.abs(t.velocity.x) * 0.5 - 0.3;
+              if (Math.random() < 0.3) t.isFalling = true; // chance to fall on hard wall hit
+          } else if (t.pos.x < -halfHall) {
+              t.pos.x = -halfHall;
+              t.velocity.x = Math.abs(t.velocity.x) * 0.5 + 0.3;
+              if (Math.random() < 0.3) t.isFalling = true;
+          }
+
+          if (t.pos.y > ceilingY) {
+              t.pos.y = ceilingY;
+              t.velocity.y = -Math.abs(t.velocity.y) * 0.3;
+          }
+
+          if (t.pos.y <= floorY) {
+              t.pos.y = floorY;
+              t.isGrounded = true;
+              t.groundTimer = 0;
+              t.velocity.set(0, 0, 0);
+          }
+
+          t.mesh.position.copy(t.pos);
+
+          if (!t.isGrounded) {
+              t.mesh.rotation.x += t.rotVel.x * delta;
+              t.mesh.rotation.y += t.rotVel.y * delta;
+              t.mesh.rotation.z += t.rotVel.z * delta;
+              t.rotVel.x += (Math.random() - 0.5) * delta * 3;
+              t.rotVel.y += (Math.random() - 0.5) * delta * 3;
+
+              const flutterX = 1.0 + Math.sin(time * 14.0 + i) * 0.15;
+              const flutterY = 1.0 + Math.cos(time * 10.0 + i) * 0.12;
+              t.mesh.scale.set(flutterX, flutterY, 1.0);
+          } else {
+              t.mesh.rotation.set(-Math.PI / 2, (i * 0.7) % Math.PI, (i * 0.3) % 0.4);
+              t.mesh.scale.set(1.0, 1.0, 1.0);
+          }
       }
 
       // Door animations
