@@ -274,7 +274,7 @@ export default function App() {
     renderer.autoClear = false;
     renderer.setPixelRatio(1); // Force 1x pixel ratio for better FPS
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = false;
     renderer.shadowMap.type = THREE.PCFShadowMap; // Cheaper than soft shadows
     currentMount.appendChild(renderer.domElement);
 
@@ -1024,7 +1024,7 @@ export default function App() {
     const spellTargetMeshes: THREE.Object3D[] = [];
     const roomLightsList: { light: THREE.PointLight, worldZ: number }[] = [];
 
-    const MAX_DYNAMIC_LIGHTS = 20;
+    const MAX_DYNAMIC_LIGHTS = 6;
     const lightPool: { light: THREE.PointLight, inUse: boolean }[] = [];
     for (let i = 0; i < MAX_DYNAMIC_LIGHTS; i++) {
         const poolLight = new THREE.PointLight(0xffffff, 0, 10);
@@ -1201,16 +1201,16 @@ export default function App() {
 
     const getFreeParticle = (isRing: boolean, isDrop: boolean) => {
       let p = particlePool.find(item => !item.inUse && (
-        isRing ? item.mesh.geometry === sharedRingGeo :
+        isRing ? (item.mesh as THREE.Mesh).geometry === sharedRingGeo :
         isDrop ? item.mesh instanceof THREE.Sprite :
-        item.mesh.geometry === sharedSparkGeo
+        (item.mesh as THREE.Mesh).geometry === sharedSparkGeo
       ));
       if (!p) {
         // Recycle oldest in-use particle if pool full
         p = particlePool.find(item => (
-          isRing ? item.mesh.geometry === sharedRingGeo :
+          isRing ? (item.mesh as THREE.Mesh).geometry === sharedRingGeo :
           isDrop ? item.mesh instanceof THREE.Sprite :
-          item.mesh.geometry === sharedSparkGeo
+          (item.mesh as THREE.Mesh).geometry === sharedSparkGeo
         ));
       }
       if (p) {
@@ -1599,7 +1599,7 @@ export default function App() {
 
     const doorWidth = 1.2;
     const doorHeight = 2.4;
-    const doors: { mesh: THREE.Mesh, pivot: THREE.Group, isOpen: boolean, isLeft: boolean, roomZ: number }[] = [];
+    const doors: { mesh: THREE.Mesh, pivot: THREE.Group, isOpen: boolean, openOutwards?: boolean, isLeft: boolean, roomZ: number }[] = [];
 
     // Shared Geometries & Materials for Room Objects (Massive memory & performance optimization)
     const roomW = 6;
@@ -2005,6 +2005,8 @@ export default function App() {
         backPlate.rotation.y = Math.PI;
         pivot.add(backPlate);
 
+
+
         group.add(pivot);
 
         const roomLight = buildRoom(group, isLeft);
@@ -2214,12 +2216,99 @@ export default function App() {
 
     const webSpidersList: WebSpiderData[] = [];
 
-    // A small spider that peeks down from the ceiling near the entrance.
-    const hangingSpider = createSpiderMesh(0.65, true);
+    // A cute hanging cartoon spider matching the reference image (round patterned abdomen, big eyes, cheeks, smile, loop, jointed legs)
+    const hangingGroup = new THREE.Group();
+    const bodyMat = new THREE.MeshBasicMaterial({ color: 0x181515 });
+    const patternMat = new THREE.MeshBasicMaterial({ color: 0x3d3535 });
+    const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const eyePupilMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+    const cheekMat = new THREE.MeshBasicMaterial({ color: 0xf43f5e });
+    const mouthMat = new THREE.MeshBasicMaterial({ color: 0x181515 });
+
+    const scale = 0.68;
+    // Thread loop at the top
+    const loopGeo = new THREE.TorusGeometry(0.015 * scale, 0.003 * scale, 6, 12, Math.PI * 1.5);
+    const loop = new THREE.Mesh(loopGeo, bodyMat);
+    loop.position.set(0, 0.095 * scale, 0);
+    loop.rotation.x = Math.PI / 2;
+    hangingGroup.add(loop);
+
+    // Round Abdomen with pattern spots
+    const abdGeo = new THREE.SphereGeometry(0.08 * scale, 12, 12);
+    const abdomen = new THREE.Mesh(abdGeo, bodyMat);
+    abdomen.position.set(0, 0.035 * scale, 0);
+    hangingGroup.add(abdomen);
+
+    // Decorative pattern spots / rings on abdomen matching reference
+    const spotGeo = new THREE.RingGeometry(0.012 * scale, 0.018 * scale, 8);
+    const spot1 = new THREE.Mesh(spotGeo, patternMat);
+    spot1.position.set(0, 0.068 * scale, 0.032 * scale);
+    spot1.rotation.x = -0.3;
+    hangingGroup.add(spot1);
+
+    const spot2 = new THREE.Mesh(spotGeo, patternMat);
+    spot2.position.set(-0.038 * scale, 0.032 * scale, -0.03 * scale);
+    spot2.rotation.y = -Math.PI / 2;
+    hangingGroup.add(spot2);
+
+    const spot3 = new THREE.Mesh(spotGeo, patternMat);
+    spot3.position.set(0.038 * scale, 0.032 * scale, -0.03 * scale);
+    spot3.rotation.y = Math.PI / 2;
+    hangingGroup.add(spot3);
+
+    // Cephalothorax / Head positioned in front/below abdomen
+    const headGeo = new THREE.SphereGeometry(0.055 * scale, 12, 12);
+    const head = new THREE.Mesh(headGeo, bodyMat);
+    head.position.set(0, -0.015 * scale, 0.048 * scale);
+    hangingGroup.add(head);
+
+    // Big cute cartoon eyes
+    for (let side = -1; side <= 1; side += 2) {
+        const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.017 * scale, 8, 8), eyeWhiteMat);
+        eyeWhite.position.set(side * 0.021 * scale, -0.005 * scale, 0.085 * scale);
+        hangingGroup.add(eyeWhite);
+
+        const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.0095 * scale, 8, 8), eyePupilMat);
+        pupil.position.set(side * 0.021 * scale, -0.005 * scale, 0.096 * scale);
+        hangingGroup.add(pupil);
+
+        const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.0085 * scale, 6, 6), cheekMat);
+        cheek.position.set(side * 0.035 * scale, -0.026 * scale, 0.081 * scale);
+        hangingGroup.add(cheek);
+    }
+
+    // Smiling mouth arc
+    const smileGeo = new THREE.TorusGeometry(0.014 * scale, 0.002 * scale, 6, 12, Math.PI);
+    const smile = new THREE.Mesh(smileGeo, mouthMat);
+    smile.position.set(0, -0.024 * scale, 0.088 * scale);
+    smile.rotation.x = Math.PI / 2;
+    hangingGroup.add(smile);
+
+    // 8 Segmented Cartoon Legs
+    const hangingLegs: THREE.Mesh[] = [];
+    for (let side = -1; side <= 1; side += 2) {
+        for (let i = 0; i < 4; i++) {
+            const legGeo = new THREE.CylinderGeometry(0.0038 * scale, 0.0022 * scale, 0.12 * scale, 4);
+            legGeo.translate(0, 0.06 * scale, 0);
+            const leg = new THREE.Mesh(legGeo, bodyMat);
+
+            const zOffset = (i - 1.5) * 0.022;
+            leg.position.set(side * 0.025 * scale, 0.01 * scale, zOffset);
+
+            const angleZ = side * (-Math.PI / 2.8 - (i - 1.5) * 0.08);
+            const angleY = side * (Math.PI / 2.2 + (i - 1.5) * 0.22);
+            leg.rotation.z = angleZ;
+            leg.rotation.y = angleY;
+
+            hangingGroup.add(leg);
+            hangingLegs.push(leg);
+        }
+    }
+
+    const hangingSpider = { group: hangingGroup, legs: hangingLegs };
     const hangingSpiderAnchorY = hallwayHeight - 0.02;
-    const hangingSpiderBaseY = hallwayHeight - 0.18;
+    const hangingSpiderBaseY = hallwayHeight - 0.20;
     hangingSpider.group.position.set(0.55, hangingSpiderBaseY, -4.5);
-    hangingSpider.group.rotation.x = Math.PI;
     scene.add(hangingSpider.group);
 
     const hangingThread = new THREE.Mesh(
@@ -2484,7 +2573,7 @@ export default function App() {
     let isGrounded = true;
     let playerY = 1.6;
 
-    let currentDoorData: { mesh: THREE.Mesh, pivot: THREE.Group, isOpen: boolean, openOutwards: boolean, isLeft: boolean, roomZ: number } | null = null;
+    let currentDoorData: { mesh: THREE.Mesh, pivot: THREE.Group, isOpen: boolean, openOutwards?: boolean, isLeft: boolean, roomZ: number } | null = null;
 
     const interact = () => {
         if (!controls.isLocked || !currentDoorData) return;
@@ -2854,15 +2943,27 @@ export default function App() {
       const hangingSpiderY = hangingSpiderBaseY - hangingDrop;
       hangingSpider.group.position.y = hangingSpiderY;
       hangingSpider.group.rotation.y = Math.sin(time * 1.4) * 0.12;
+      // Pendulum swing on thread for realism
+      hangingSpider.group.rotation.z = Math.sin(time * 1.2) * 0.08;
+      hangingSpider.group.rotation.x = Math.cos(time * 0.9) * 0.06;
       hangingThread.position.y = (hangingSpiderAnchorY + hangingSpiderY) / 2;
       hangingThread.scale.y = hangingSpiderAnchorY - hangingSpiderY;
+      
       const hangingRetract = Math.max(0, -Math.cos(time * 0.75 - Math.PI / 2));
+      const downwardVelocity = Math.cos(time * 0.75);
       hangingSpider.legs.forEach((leg, idx) => {
           const side = idx < 4 ? -1 : 1;
           const pairIndex = idx % 4;
-          const idleTwitch = Math.sin(time * 2.2 + pairIndex * 1.3) * 0.015;
-          leg.rotation.x = 0;
-          leg.rotation.z = side * (-Math.PI / 3 + hangingRetract * 0.22 + idleTwitch);
+          const phase = time * 4.5 + pairIndex * 0.75 + (side > 0 ? 0.35 : 0);
+          const microTwitch = Math.sin(phase * 1.6) * 0.045 + Math.cos(phase * 2.4) * 0.025;
+          
+          const baseZ = side * (-Math.PI / 2.8 + pairIndex * 0.04);
+          const baseX = (pairIndex - 1.5) * 0.08 + downwardVelocity * 0.06;
+          const baseY = side * microTwitch * 0.6;
+
+          leg.rotation.z = baseZ + hangingRetract * 0.15 + microTwitch;
+          leg.rotation.x = baseX + Math.sin(phase) * 0.07;
+          leg.rotation.y = baseY + Math.cos(phase * 0.8) * 0.06;
       });
 
       if (controls.isLocked) {

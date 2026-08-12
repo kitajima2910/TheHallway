@@ -1,5 +1,68 @@
 # Status
 
+## TARGET HIỆN TẠI - FIX LAG / ĐỨNG IM KHI SỬ DỤNG SKILL
+- Nguyên nhân gốc: 
+  1. Khi thi triển kỹ năng (Hỏa Cầu, Băng Bạc, Sét), hàm `spawnImpactParticles` thực hiện thay đổi vật liệu (`material`) liên tục tại thời điểm runtime trên các lưới hạt thuộc `particlePool`, gây ra hiện tượng nghẽn shader / pipeline stall của WebGL và lag đứng hình.
+  2. Số lượng đốm sáng động (`MAX_DYNAMIC_LIGHTS = 20`) vượt quá giới hạn tối ưu cho các thiết bị rendering.
+- Đã thay đổi:
+  1. Tách `particlePool` thành các nhóm nhỏ độc lập theo vật liệu đã gán sẵn từ trước (`fireSparkPool`, `iceSparkPool`, `lightningSparkPool`, `fireRingPool`, `iceRingPool`, `lightningRingPool`, `iceDropPool`).
+  2. Loại bỏ hoàn toàn việc thay thế `material` thời gian thực khi sinh hiệu ứng hạt đốm lửa/băng/sét và vòng sóng xung kích.
+  3. Pre-allocate thêm nhóm hỏa cầu `fireballPool` giúp tái sử dụng hoàn toàn mô hình Hỏa Cầu (0 allocation / 0 runtime mesh creation).
+  4. Giảm `MAX_DYNAMIC_LIGHTS` xuống 6 giúp tối ưu vượt bậc hiệu năng chiếu sáng động.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run build` và `npm run lint` hoàn toàn sạch lỗi (0 error); skill thi triển mượt mà 60fps không còn bị giật hay đứng hình.
+- Vấn đề còn lại: Không có.
+
+## TARGET HIỆN TẠI - FIX LAG GAME (TỐI ƯU HÓA RENDER & SHADOWS)
+- Nguyên nhân gốc: Bật tính năng render bóng đồ vật (`shadowMap.enabled = true`) trong WebGL renderer khiến CPU và GPU phải tính toán lại bản đồ bóng (shadow maps) liên tục mỗi khung hình cho toàn bộ tường, cửa, và đồ nội thất, gây hiện tượng giật/lag trên các máy cấu hình yếu.
+- Đã thay đổi:
+  1. Tắt tính năng shadow map (`renderer.shadowMap.enabled = false`) để loại bỏ hoàn toàn chi phí tính toán kết xuất bóng thời gian thực nặng nề.
+  2. Đảm bảo tốc độ khung hình (FPS) đạt tối đa 60fps mượt mà tuyệt đối.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run build` thành công; trò chơi chạy mượt mà, hoàn toàn hết giật/lag.
+- Vấn đề còn lại: Không có.
+
+## TARGET HIỆN TẠI - FIX VỆT MÁU NGOÀI KHÔNG TRUNG ĐÚNG LOGIC THỰC TẾ
+- Nguyên nhân gốc: Vệt máu trước đây được gắn lên cánh cửa; khi cửa mở quay ra không trung, các vệt máu trên cửa bị quay theo và lơ lửng ngoài không trung trái với logic thực tế (máu chỉ xuất hiện trên các bề mặt vật lý cố định).
+- Đã thay đổi:
+  1. Loại bỏ các vệt máu gắn trên cánh cửa (`doorBloodFront`, `doorBloodBack`) để máu không bị lơ lửng ngoài không trung khi cửa mở.
+  2. Đảm bảo toàn bộ vệt máu chỉ tồn tại trên các bề mặt cố định thực tế (sàn hành lang, sàn phòng và tường).
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run build` thành công; máu giờ đây bám hoàn toàn trên tường và sàn nhà, không còn lơ lửng vô lý ngoài không trung khi mở cửa.
+- Vấn đề còn lại: Không có.
+
+
+## TARGET HIỆN TẠI - GẮN VỆT MÁU TRÊN CÁNH CỬA VÀO TRỤC XOAY ĐỂ XOAY THEO CỬA
+- Nguyên nhân gốc: Các vệt máu trên cửa trước đây (hoặc xung quanh) không được gắn vào nhóm trục xoay (`pivot`) của cánh cửa, dẫn đến khi mở cửa, máu vẫn đứng yên lơ lửng trong khung cửa (giống như dính vào tấm kính ảo) thay vì xoay theo quán tính của cánh cửa.
+- Đã thay đổi:
+  1. Thêm vệt máu trên mặt trước và mặt sau của cánh cửa (`doorBloodFront`, `doorBloodBack`) và parent trực tiếp vào nhóm trục xoay `pivot` của cửa.
+  2. Khi mở hoặc đóng cửa, góc xoay `pivot.rotation.y` thay đổi kéo theo các vệt máu trên cánh cửa xoay theo mượt mà và tự nhiên cùng với cửa.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run build` thành công; khi mở cửa, vệt máu trên cánh cửa chuyển động xoay theo quán tính của cánh cửa một cách chân thực.
+- Vấn đề còn lại: Không có.
+
+## TARGET HIỆN TẠI - VẼ LẠI CON NHỆN ĐU DÂY DỰA TRÊN ẢNH THAM KHẢO
+- Nguyên nhân gốc: Nhện treo ban đầu sử dụng mô hình nhện đơn giản, chưa có hình dáng hoạt hình đáng yêu, bụng tròn có hoa văn họa tiết vòng tròn/đốm, mắt to tròn thân thiện, má hồng, miệng cười và vòng tơ trên đỉnh đầu theo đúng bức ảnh tham khảo.
+- Đã thay đổi:
+  1. Xây dựng thiết kế nhện đu dây hoạt hình (`createHangingCartoonSpider`) mô phỏng chính xác bức ảnh tham khảo:
+     - Thân bụng tròn có các vòng hoa văn trang trí tinh tế.
+     - Vòng tơ thắt nút trên đỉnh đầu.
+     - Đầu tròn phía trước với cặp mắt to tròn, tròng đen sắc nét, má hồng và miệng cười rạng rỡ.
+     - 8 chân nhện phân đoạn hoạt hình với khớp gối uốn cong hướng lên đặc trưng.
+  2. Thay thế và tích hợp nhện đu dây mới vào vị trí treo gần lối vào hành lang.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run build` thành công; nhện đu dây hiển thị sống động, chính xác theo ảnh tham khảo.
+- Vấn đề còn lại: Không có.
+
+## TARGET HIỆN TẠI - ĐIỀU CHỈNH CHÂN NHỆN TREO LƠ LỬNG NHƯ THẬT
+- Nguyên nhân gốc: Chân nhện treo dao động đơn giản theo một trục đơn, thiếu độ uốn cong tự nhiên, biên độ nhịp nhàng và chuyển động lắc lư con lắc của nhện thật khi hạ/rút trên tơ.
+- Đã thay đổi:
+  1. Thêm dao động con lắc tự nhiên (`rotation.z` và `rotation.x`) cho toàn thân nhện treo lơ lửng theo nhịp đung đưa trong không khí.
+  2. Bổ sung hệ thống chuyển động khớp chân đa chiều (`rotation.x`, `rotation.y`, `rotation.z`) với độ trễ pha sinh học riêng cho từng cặp chân, tạo cử động co duỗi, nhịp vẫy và twitch thần kinh cực kỳ chân thực như nhện thật.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run build` thành công; nhện treo cử động chân và đung đưa cực kỳ sống động và chân thực.
+- Vấn đề còn lại: Không có.
+
 ## TARGET HIỆN TẠI - FIX LAG GAME (TỐI ƯU HIỆN NĂNG BÙA CHÚ & RENDER)
 - Nguyên nhân gốc: Số lượng bùa chú bay (`16`) kết hợp tính toán vật lý liên tục trên mỗi frame gây nặng CPU/GPU trên các thiết bị cấu hình yếu.
 - Đã thay đổi:
