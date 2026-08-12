@@ -1,5 +1,25 @@
 # Status
 
+## TARGET HIỆN TẠI - TẠO BẢN ĐỒ 2D MINIMAP OVERLAY Ở GÓC TRÊN BÊN TRÁI
+- Nguyên nhân gốc: Trò chơi chưa có bản đồ tổng quan (minimap) trực quan giúp người chơi định vị vị trí và hướng nhìn trong mê cung hành lang.
+- Đã thay đổi:
+  1. Thêm thẻ `<canvas>` ref `minimapCanvasRef` đặt trong khung giao diện HUD ở góc trên bên trái (`absolute top-6 left-6`).
+  2. Xây dựng vòng lặp render 2D canvas trực tiếp theo mỗi frame trong `animate()` để vẽ sơ đồ hành lang, các phòng đối xứng hai bên, vị trí ma quái (ghost spawn point) và mũi tên chỉ vị trí cũng như hướng nhìn thực tế của người chơi.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); minimap 2D hoạt động mượt mà, định vị chính xác vị trí và góc quay của người chơi theo thời gian thực.
+- Vấn đề còn lại: Không có.
+
+
+## TARGET HIỆN TẠI - TÍCH HỆ THỐNG ÂM THANH TIẾNG THÌ THẦM & TÍN HIỆU RÙ RỢN KHI TIẾN GẦN ĐIỂM HỒ SƠ / MA XUẤT HIỆN
+- Nguyên nhân gốc: Trò chơi chưa có hệ thống âm thanh không gian động (ambient audio system) phát ra tiếng thì thầm và âm thanh rùng rợn khi người chơi tiến lại gần các điểm xuất hiện ma (`currentGhostSpawnZ`).
+- Đã thay đổi:
+  1. Tích hợp hệ thống quản lý âm thanh sử dụng Web Audio API (`playCreepyWhisperOrCue`).
+  2. Tổng hợp thời gian thực các âm thanh tiếng thì thầm (bandpass filtered white noise) và tín hiệu rùng rợn (lowpass eerie tones với pitch bend) mà không cần file audio bên ngoài.
+  3. Cài đặt logic khoảng cách động (`distToGhost` và `ghostTriggered`) trong vòng lặp `animate()`: Khi người chơi tiến lại gần điểm xuất hiện ma, âm lượng (volume/gain) tự động tăng lên và tần suất xuất hiện âm thanh tăng dần (tần suất dồn dập hơn).
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); âm thanh thì thầm và rùng rợn phản hồi chính xác khoảng cách tới vị trí ma xuất hiện.
+- Vấn đề còn lại: Không có.
+
 ## TARGET HIỆN TẠI - FIX LAG / GIẬT ĐỨNG KHI DI CHUYỂN, DÙNG SKILL VÀ NHÌN ĐỒ VẬT CHO MÁY YẾU YẾU CÙI
 - Nguyên nhân gốc:
   1. Mỗi khi người chơi đi ngang qua các phòng (vượt ngưỡng 26m culling) hoặc bắn skill, thuộc tính `visible` của đèn bị thay đổi. Đối với WebGL / Three.js, việc thay đổi số lượng đèn (light) khả dụng trong cảnh sẽ ép toàn bộ hệ thống phải **Recompile lại Shader của toàn bộ vật liệu**. Đây là nguyên nhân trí mạng gây khựng / giật đứng hình (freeze) khi di chuyển và sử dụng skill trên các máy GPU yếu.

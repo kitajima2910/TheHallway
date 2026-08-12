@@ -248,6 +248,7 @@ const createSnowflakeTexture = () => {
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
+  const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
   const interactTextRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<any>(null);
   const lockCooldownRef = useRef<boolean>(false);
@@ -2585,6 +2586,70 @@ export default function App() {
     let ghostTimer = 2 + Math.random() * 8; // 2 to 10 seconds random timer
     let currentGhostSpawnZ = -30;
     let ghostDirection = 1; // 1 for left to right, -1 for right to left
+    let ambientAudioTimer = 3.0;
+
+    const playCreepyWhisperOrCue = (intensity: number) => {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      const now = audioCtx.currentTime;
+      const isWhisper = Math.random() > 0.4;
+
+      if (isWhisper) {
+        const bufferSize = audioCtx.sampleRate * 0.6;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(800 + Math.random() * 1200, now);
+        filter.Q.setValueAtTime(8, now);
+
+        const gain = audioCtx.createGain();
+        const maxGain = 0.08 + intensity * 0.35;
+        gain.gain.setValueAtTime(0.01, now);
+        gain.gain.linearRampToValueAtTime(maxGain, now + 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        noise.start(now);
+        noise.stop(now + 0.6);
+      } else {
+        const osc = audioCtx.createOscillator();
+        const filter = audioCtx.createBiquadFilter();
+        const gain = audioCtx.createGain();
+
+        osc.type = Math.random() > 0.5 ? 'sawtooth' : 'sine';
+        const baseFreq = 100 + Math.random() * 120;
+        osc.frequency.setValueAtTime(baseFreq, now);
+        osc.frequency.exponentialRampToValueAtTime(baseFreq * (0.5 + Math.random() * 0.5), now + 0.8);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(350 + intensity * 650, now);
+
+        const maxGain = 0.06 + intensity * 0.28;
+        gain.gain.setValueAtTime(0.01, now);
+        gain.gain.linearRampToValueAtTime(maxGain, now + 0.2);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.8);
+      }
+    };
 
     // Movement state
     const moveState = {
@@ -2768,6 +2833,17 @@ export default function App() {
 
       // Subtly animate the light intensity
       endLight.intensity = 300 + Math.sin(time * 5) * 20;
+
+      // Ambient whispers & creepy audio cues increasing in volume & frequency near ghost spawn point
+      const distToGhost = Math.abs(camera.position.z - currentGhostSpawnZ);
+      const proximity = Math.max(0, Math.min(1, 1 - distToGhost / 28.0));
+      const ghostIntensity = Math.min(1.0, proximity + (ghostTriggered ? 0.45 : 0));
+
+      ambientAudioTimer -= delta;
+      if (ambientAudioTimer <= 0) {
+          ambientAudioTimer = Math.max(0.35, 3.2 - ghostIntensity * 2.8 + Math.random() * 0.6);
+          playCreepyWhisperOrCue(ghostIntensity);
+      }
 
       // Ghost animation
       if (!ghostTriggered) {
@@ -3564,6 +3640,85 @@ export default function App() {
       fpsGroup.visible = true;
       renderer.clearDepth();
       renderer.render(fpsGroup, camera);
+
+      // --- Update 2D Minimap Canvas ---
+      if (minimapCanvasRef.current) {
+        const mCanvas = minimapCanvasRef.current;
+        const mCtx = mCanvas.getContext('2d');
+        if (mCtx) {
+          mCtx.clearRect(0, 0, mCanvas.width, mCanvas.height);
+
+          // Background
+          mCtx.fillStyle = '#111115';
+          mCtx.fillRect(0, 0, mCanvas.width, mCanvas.height);
+
+          const scaleZ = (mCanvas.height - 20) / 80.0;
+          const scaleX = (mCanvas.width - 20) / 12.0;
+          const centerX = mCanvas.width / 2;
+          const startY = 10;
+
+          // Hallway Corridor
+          const corridorX = centerX - 2 * scaleX;
+          const corridorY = startY;
+          const corridorW = 4 * scaleX;
+          const corridorH = 80 * scaleZ;
+          mCtx.fillStyle = '#222228';
+          mCtx.fillRect(corridorX, corridorY, corridorW, corridorH);
+          mCtx.strokeStyle = '#444455';
+          mCtx.lineWidth = 1;
+          mCtx.strokeRect(corridorX, corridorY, corridorW, corridorH);
+
+          // Rooms
+          for (let z = 2; z > -70; z -= 6) {
+            const ry = startY + (4 - z) * scaleZ;
+            mCtx.fillStyle = '#1a1a22';
+            mCtx.fillRect(centerX - 6 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
+            mCtx.strokeStyle = '#333344';
+            mCtx.strokeRect(centerX - 6 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
+
+            mCtx.fillRect(centerX + 2 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
+            mCtx.strokeRect(centerX + 2 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
+          }
+
+          // Ghost point
+          const ghostMapY = startY + (4 - currentGhostSpawnZ) * scaleZ;
+          mCtx.fillStyle = ghostTriggered ? '#ff3333' : '#aa2222';
+          mCtx.beginPath();
+          mCtx.arc(centerX, ghostMapY, 3.5, 0, Math.PI * 2);
+          mCtx.fill();
+          if (ghostTriggered) {
+            mCtx.strokeStyle = '#ff9999';
+            mCtx.lineWidth = 1.5;
+            mCtx.stroke();
+          }
+
+          // Player position & direction
+          const pX = camera.position.x;
+          const pZ = camera.position.z;
+          const playerMapX = centerX + pX * scaleX;
+          const playerMapY = startY + (4 - pZ) * scaleZ;
+
+          camera.getWorldDirection(tempCamWorldDir);
+          const playerAngle = Math.atan2(tempCamWorldDir.x, tempCamWorldDir.z);
+
+          mCtx.save();
+          mCtx.translate(playerMapX, playerMapY);
+          mCtx.rotate(-playerAngle);
+
+          mCtx.fillStyle = '#00ffff';
+          mCtx.beginPath();
+          mCtx.moveTo(0, -5);
+          mCtx.lineTo(-4, 4);
+          mCtx.lineTo(4, 4);
+          mCtx.closePath();
+          mCtx.fill();
+          mCtx.strokeStyle = '#ffffff';
+          mCtx.lineWidth = 1;
+          mCtx.stroke();
+
+          mCtx.restore();
+        }
+      }
     };
 
     animate();
@@ -3612,10 +3767,12 @@ export default function App() {
         <p className="mt-12 text-sm text-red-900 font-sans tracking-normal">CẢNH BÁO: Có ánh sáng nhấp nháy và âm thanh bất ngờ</p>
       </div>
 
-      {/* Top Controls Bar */}
-      <div className="absolute top-6 left-6 pointer-events-none z-10">
-        <div className="text-white/70 font-sans text-xs md:text-sm bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 shadow-lg">
-          [1, 2, 3] Chọn Phép &nbsp;•&nbsp; [CHUỘT TRÁI] Bắn Phép &nbsp;•&nbsp; [W,A,S,D] Di chuyển &nbsp;•&nbsp; [E] Tương tác &nbsp;•&nbsp; [SPACE] Nhảy
+      {/* 2D Minimap Overlay in Top-Left Corner */}
+      <div className="absolute top-6 left-6 pointer-events-none z-10 flex flex-col items-center bg-black/85 backdrop-blur-md p-2.5 rounded-2xl border border-white/20 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
+        <div className="text-white/80 font-sans text-[10px] tracking-widest font-semibold mb-1.5 uppercase">BẢN ĐỒ MÊ CUNG</div>
+        <canvas ref={minimapCanvasRef} width={120} height={140} className="rounded-lg border border-white/10 bg-[#0d0d12]" />
+        <div className="text-white/60 font-sans text-[9px] mt-1.5 text-center leading-tight">
+          [1,2,3] Đổi Phép • [WASD] Di chuyển
         </div>
       </div>
 
