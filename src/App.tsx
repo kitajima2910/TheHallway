@@ -246,9 +246,55 @@ const createSnowflakeTexture = () => {
     return texture;
 };
 
+const createWallSymbolTexture = (dir: 'up' | 'right' | 'left' | 'down' = 'up') => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+        ctx.fillStyle = 'rgba(10, 10, 15, 0.85)';
+        ctx.fillRect(0, 0, 256, 256);
+
+        ctx.shadowColor = '#00ffcc';
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.arc(128, 128, 92, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00ffcc';
+        ctx.lineWidth = 10;
+        ctx.stroke();
+
+        ctx.save();
+        ctx.translate(128, 128);
+        if (dir === 'right') ctx.rotate(Math.PI / 2);
+        else if (dir === 'left') ctx.rotate(-Math.PI / 2);
+        else if (dir === 'down') ctx.rotate(Math.PI);
+        ctx.translate(-128, -128);
+
+        // Arrow pointing UP
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(128, 52);
+        ctx.lineTo(185, 135);
+        ctx.lineTo(148, 135);
+        ctx.lineTo(148, 204);
+        ctx.lineTo(108, 204);
+        ctx.lineTo(108, 135);
+        ctx.lineTo(71, 135);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = '#00ffcc';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.restore();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+};
+
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
-  const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
   const interactTextRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<any>(null);
   const lockCooldownRef = useRef<boolean>(false);
@@ -1609,24 +1655,24 @@ export default function App() {
         polygonOffsetUnits: -1
     });
 
-    // Floor
-    const floorGeometry = new THREE.PlaneGeometry(hallwayWidth, hallwayLength);
-    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.z = -hallwayLength / 2 + 5; 
-    floor.receiveShadow = true;
-    scene.add(floor);
-    spellTargetMeshes.push(floor);
+    // Helper to build corridor segment (floor, ceiling)
+    const buildCorridorSegment = (centerX: number, centerZ: number, sizeX: number, sizeZ: number, isVertical: boolean) => {
+        const floorGeo = new THREE.PlaneGeometry(isVertical ? hallwayWidth : sizeX, isVertical ? sizeZ : hallwayWidth);
+        const floorMesh = new THREE.Mesh(floorGeo, floorMaterial);
+        floorMesh.rotation.x = -Math.PI / 2;
+        floorMesh.position.set(centerX, 0.01, centerZ);
+        floorMesh.receiveShadow = true;
+        scene.add(floorMesh);
+        spellTargetMeshes.push(floorMesh);
 
-    // Ceiling
-    const ceilingGeometry = new THREE.PlaneGeometry(hallwayWidth, hallwayLength);
-    const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
-    ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.y = hallwayHeight;
-    ceiling.position.z = -hallwayLength / 2 + 5;
-    ceiling.receiveShadow = true;
-    scene.add(ceiling);
-    spellTargetMeshes.push(ceiling);
+        const ceilingGeo = new THREE.PlaneGeometry(isVertical ? hallwayWidth : sizeX, isVertical ? sizeZ : hallwayWidth);
+        const ceilingMesh = new THREE.Mesh(ceilingGeo, ceilingMaterial);
+        ceilingMesh.rotation.x = Math.PI / 2;
+        ceilingMesh.position.set(centerX, hallwayHeight, centerZ);
+        ceilingMesh.receiveShadow = true;
+        scene.add(ceilingMesh);
+        spellTargetMeshes.push(ceilingMesh);
+    };
 
     const doorWidth = 1.2;
     const doorHeight = 2.4;
@@ -2061,13 +2107,133 @@ export default function App() {
         spellTargetMeshes.push(wall);
     };
 
-    for (let z = 0; z > -hallwayLength + 10; z -= 6) {
+    const buildWallSymbol = (x: number, z: number, rotationY: number, dir: 'up' | 'right' | 'left' | 'down' = 'up') => {
+        const symbolMat = new THREE.MeshBasicMaterial({
+            map: createWallSymbolTexture(dir),
+            transparent: true,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1
+        });
+        const symbolMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55), symbolMat);
+        symbolMesh.position.set(x, hallwayHeight / 2 + 0.2, z);
+        symbolMesh.rotation.y = rotationY;
+        scene.add(symbolMesh);
+    };
+
+    const getHallwayCenterX = (z: number, x?: number) => {
+        if (z >= -36 && z <= 4) {
+            if (x !== undefined && x > 12 && z >= -36 && z <= -16) return 24;
+            return 0;
+        } else if (z >= -76 && z < -36) {
+            if (x !== undefined && x < 0 && z >= -76 && z <= -52) return -12;
+            return 24;
+        } else if (z >= -116 && z < -76) {
+            if (x !== undefined && x > 2 && z >= -116 && z <= -92) return 16;
+            return -12;
+        } else if (z < -116) {
+            return 16;
+        }
+        return 0;
+    };
+
+    // Build Expanded Labyrinth Maze (4 Main Segments, 3 Corner Turns, 3 Dead-End Branches, 60+ Rooms)
+    // Segment 1 (Vertical Z: +4 down to -36 at X = 0)
+    buildCorridorSegment(0, -16, hallwayWidth, 40, true);
+    buildPlainWall(0, 4, 0, hallwayWidth); // North cap behind player
+    buildPlainWall(-hallwayWidth / 2, -33, Math.PI / 2, 6); // Left wall end
+    buildPlainWall(hallwayWidth / 2, -32.125, -Math.PI / 2, 4.25); // Right wall end
+    for (let z = 0; z >= -30; z -= 6) {
         const roomIdx = Math.round(-z / 6);
-        const leftRoomNum = (101 + roomIdx * 2).toString();
-        const rightRoomNum = (102 + roomIdx * 2).toString();
-        buildWallWithDoor(-hallwayWidth / 2, z, Math.PI / 2, true, leftRoomNum);
-        buildWallWithDoor(hallwayWidth / 2, z, -Math.PI / 2, false, rightRoomNum);
+        buildWallWithDoor(-hallwayWidth / 2, z, Math.PI / 2, true, (101 + roomIdx * 2).toString());
+        buildWallWithDoor(hallwayWidth / 2, z, -Math.PI / 2, false, (102 + roomIdx * 2).toString());
     }
+
+    // Corner 1 (Right turn at Z = -36, X from 0 to 24)
+    buildCorridorSegment(12, -36, 24, hallwayWidth, false);
+    buildPlainWall(-hallwayWidth / 2, -36, Math.PI / 2, hallwayWidth); // West end wall
+    buildPlainWall(12, -36 + hallwayWidth / 2, 0, 20.5); // South corner wall
+    buildPlainWall(10.25, -36 - hallwayWidth / 2, Math.PI, 24); // North corner wall
+
+    // Branch 1 (Dead End North: X = 24, Z from -36 UP to -16)
+    buildCorridorSegment(24, -26, hallwayWidth, 20, true);
+    buildPlainWall(24, -16, Math.PI, hallwayWidth); // Dead end cap
+    buildPlainWall(24 + hallwayWidth / 2, -25.125, -Math.PI / 2, 18.25); // Outer east wall
+    buildWallWithDoor(24 - hallwayWidth / 2, -22, Math.PI / 2, true, "201");
+    buildWallWithDoor(24 - hallwayWidth / 2, -28, Math.PI / 2, true, "203");
+
+    // Segment 2 (Vertical Z: -36 down to -76 at X = 24)
+    buildCorridorSegment(24, -56, hallwayWidth, 40, true);
+    buildPlainWall(24 + hallwayWidth / 2, -55.125, -Math.PI / 2, 37.75); // East wall
+    for (let z = -42; z >= -72; z -= 6) {
+        const roomIdx = 6 + Math.round((-42 - z) / 6);
+        buildWallWithDoor(24 - hallwayWidth / 2, z, Math.PI / 2, true, (205 + roomIdx * 2).toString());
+        buildWallWithDoor(24 + hallwayWidth / 2, z, -Math.PI / 2, false, (206 + roomIdx * 2).toString());
+    }
+
+    // Corner 2 (Left turn at Z = -76, X from 24 down to -12)
+    buildCorridorSegment(6, -76, 36, hallwayWidth, false);
+    buildPlainWall(24 + hallwayWidth / 2, -76, -Math.PI / 2, hallwayWidth); // East end wall
+    buildPlainWall(6, -76 + hallwayWidth / 2, 0, 32.5); // South corner wall
+    buildPlainWall(6, -76 - hallwayWidth / 2, Math.PI, 39.5); // North corner wall
+
+    // Branch 2 (Dead End North: X = -12, Z from -76 UP to -52)
+    buildCorridorSegment(-12, -64, hallwayWidth, 24, true);
+    buildPlainWall(-12, -52, Math.PI, hallwayWidth); // Dead end cap
+    buildPlainWall(-12 - hallwayWidth / 2, -63.125, Math.PI / 2, 22.25); // West wall
+    buildWallWithDoor(-12 + hallwayWidth / 2, -58, -Math.PI / 2, false, "302");
+    buildWallWithDoor(-12 + hallwayWidth / 2, -64, -Math.PI / 2, false, "304");
+
+    // Segment 3 (Vertical Z: -76 down to -116 at X = -12)
+    buildCorridorSegment(-12, -96, hallwayWidth, 40, true);
+    buildPlainWall(-12 - hallwayWidth / 2, -96.125, Math.PI / 2, 38.25); // West wall
+    for (let z = -82; z >= -112; z -= 6) {
+        const roomIdx = 14 + Math.round((-82 - z) / 6);
+        buildWallWithDoor(-12 - hallwayWidth / 2, z, Math.PI / 2, true, (305 + roomIdx * 2).toString());
+        buildWallWithDoor(-12 + hallwayWidth / 2, z, -Math.PI / 2, false, (306 + roomIdx * 2).toString());
+    }
+
+    // Corner 3 (Right turn at Z = -116, X from -12 to +16)
+    buildCorridorSegment(2, -116, 28, hallwayWidth, false);
+    buildPlainWall(-12 - hallwayWidth / 2, -116, Math.PI / 2, hallwayWidth); // West end wall
+    buildPlainWall(2, -116 + hallwayWidth / 2, 0, 24.5); // South corner wall
+    buildPlainWall(2, -116 - hallwayWidth / 2, Math.PI, 31.5); // North corner wall
+
+    // Branch 3 (Dead End North: X = +16, Z from -116 UP to -92)
+    buildCorridorSegment(16, -104, hallwayWidth, 24, true);
+    buildPlainWall(16, -92, Math.PI, hallwayWidth); // Dead end cap
+    buildPlainWall(16 + hallwayWidth / 2, -103.125, -Math.PI / 2, 22.25); // East wall
+    buildWallWithDoor(16 - hallwayWidth / 2, -98, Math.PI / 2, true, "401");
+    buildWallWithDoor(16 - hallwayWidth / 2, -104, Math.PI / 2, true, "403");
+
+    // Segment 4 (Vertical Z: -116 down to -156 at X = +16 - Exit Segment)
+    buildCorridorSegment(16, -136, hallwayWidth, 40, true);
+    buildPlainWall(16 + hallwayWidth / 2, -136.875, -Math.PI / 2, 38.25); // East wall
+    buildPlainWall(16, -156, 0, hallwayWidth); // Exit End Wall at Z = -156
+    for (let z = -122; z >= -150; z -= 6) {
+        const roomIdx = 22 + Math.round((-122 - z) / 6);
+        buildWallWithDoor(16 - hallwayWidth / 2, z, Math.PI / 2, true, (405 + roomIdx * 2).toString());
+        buildWallWithDoor(16 + hallwayWidth / 2, z, -Math.PI / 2, false, (406 + roomIdx * 2).toString());
+    }
+
+    // Place guiding wall symbols towards the brightest spot (exit)
+    // 1. Segment 1 Left Wall: Arrow points forward along corridor (-Z)
+    buildWallSymbol(-2.95, -14, Math.PI / 2, 'right');
+    // 2. Corner 1 End Wall: Arrow points right into Corner 1 (+X)
+    buildWallSymbol(0, -38.95, 0, 'right');
+    // 3. Segment 2 Right Wall: Arrow points forward along corridor (-Z)
+    buildWallSymbol(26.95, -55, -Math.PI / 2, 'left');
+    // 4. Corner 2 End Wall: Arrow points left into Corner 2 (-X)
+    buildWallSymbol(24, -78.95, 0, 'left');
+    // 5. Segment 3 Left Wall: Arrow points forward along corridor (-Z)
+    buildWallSymbol(-14.95, -96, Math.PI / 2, 'right');
+    // 6. Corner 3 End Wall: Arrow points right into Corner 3 (+X)
+    buildWallSymbol(-12, -118.95, 0, 'right');
+    // 7. Segment 4 Right Wall: Arrow points forward along corridor (-Z towards Exit)
+    buildWallSymbol(18.95, -136, -Math.PI / 2, 'left');
+    // 8. Exit End Wall: Arrow points directly to glowing exit doorway
+    buildWallSymbol(13.5, -155.95, 0, 'right');
+
     const doorMeshes = doors.map(d => d.mesh);
     
     // Hallway blood splatters
@@ -3134,23 +3300,30 @@ export default function App() {
           const newX = camera.position.x;
           const newZ = camera.position.z;
           
-          const collisionMargin = 0.25;
+          const collisionMargin = 0.28;
           const halfHall = hallwayWidth / 2;
+          const wMargin = halfHall - collisionMargin;
           
           const isValidPosition = (x: number, z: number) => {
-              // 1. Check main hallway
-              if (x > -halfHall + collisionMargin && 
-                  x < halfHall - collisionMargin && 
-                  z < 4 && 
-                  z > -hallwayLength + 6) {
-                  return true;
-              }
+              // 1. Check main corridor segments, corners, and dead-end branches
+              if (x >= -wMargin && x <= wMargin && z <= 4 && z >= -36) return true; // Segment 1
+              if (z >= -36 - wMargin && z <= -36 + wMargin && x >= 0 && x <= 24) return true; // Corner 1
+              if (x >= 24 - wMargin && x <= 24 + wMargin && z >= -36 && z <= -16) return true; // Branch 1
+              if (x >= 24 - wMargin && x <= 24 + wMargin && z <= -36 && z >= -76) return true; // Segment 2
+              if (z >= -76 - wMargin && z <= -76 + wMargin && x >= -12 && x <= 24) return true; // Corner 2
+              if (x >= -12 - wMargin && x <= -12 + wMargin && z >= -76 && z <= -52) return true; // Branch 2
+              if (x >= -12 - wMargin && x <= -12 + wMargin && z <= -76 && z >= -116) return true; // Segment 3
+              if (z >= -116 - wMargin && z <= -116 + wMargin && x >= -12 && x <= 16) return true; // Corner 3
+              if (x >= 16 - wMargin && x <= 16 + wMargin && z >= -116 && z <= -92) return true; // Branch 3
+              if (x >= 16 - wMargin && x <= 16 + wMargin && z <= -116 && z >= -156) return true; // Segment 4
               
               // 2. Check rooms and doorways
               for (let i = 0; i < doors.length; i++) {
                   const door = doors[i];
                   const roomZ = door.roomZ;
                   if (Math.abs(z - roomZ) > 3.5) continue;
+
+                  const doorHcx = getHallwayCenterX(roomZ, door.mesh.parent?.position.x);
 
                   const doorMinZ = roomZ - doorWidth / 2 + collisionMargin;
                   const doorMaxZ = roomZ + doorWidth / 2 - collisionMargin;
@@ -3160,20 +3333,20 @@ export default function App() {
 
                   if (z >= rMinZ && z <= rMaxZ) {
                       if (door.isLeft) {
-                          const roomMinX = -halfHall - 5 + collisionMargin;
-                          const roomMaxX = -halfHall + collisionMargin;
+                          const roomMinX = doorHcx - halfHall - 5 + collisionMargin;
+                          const roomMaxX = doorHcx - halfHall + collisionMargin;
                           
                           if (x < roomMaxX && x > roomMinX) {
                               const inDoorwayZ = (z >= doorMinZ && z <= doorMaxZ);
                               
-                              if (x >= -halfHall - collisionMargin) {
+                              if (x >= doorHcx - halfHall - collisionMargin) {
                                   if (!inDoorwayZ || !door.isOpen) {
                                       continue;
                                   }
                               }
 
                               const lx = roomZ - z;
-                              const lz = x + halfHall;
+                              const lz = x - (doorHcx - halfHall);
                               const feetY = playerY - 1.6;
 
                               if (lx > 0.75 - collisionMargin && lx < 2.85 + collisionMargin && lz > -5.0 - collisionMargin && lz < -2.4 + collisionMargin) {
@@ -3191,7 +3364,7 @@ export default function App() {
                                   const isInsidePanel = (lx > lxMin && lx < lxMax && lz > lzMin && lz < lzMax);
                                   if (isInsidePanel) {
                                       const oldLx = roomZ - oldZ;
-                                      const oldLz = oldX + halfHall;
+                                      const oldLz = oldX - (doorHcx - halfHall);
                                       const isOldInsidePanel = (oldLx > lxMin && oldLx < lxMax && oldLz > lzMin && oldLz < lzMax);
                                       if (!isOldInsidePanel) {
                                           return false;
@@ -3201,20 +3374,20 @@ export default function App() {
                               return true;
                           }
                       } else {
-                          const roomMinX = halfHall - collisionMargin;
-                          const roomMaxX = halfHall + 5 - collisionMargin;
+                          const roomMinX = doorHcx + halfHall - collisionMargin;
+                          const roomMaxX = doorHcx + halfHall + 5 - collisionMargin;
                           
                           if (x > roomMinX && x < roomMaxX) {
                               const inDoorwayZ = (z >= doorMinZ && z <= doorMaxZ);
                               
-                              if (x <= halfHall + collisionMargin) {
+                              if (x <= doorHcx + halfHall + collisionMargin) {
                                   if (!inDoorwayZ || !door.isOpen) {
                                       continue;
                                   }
                               }
 
                               const lx = z - roomZ;
-                              const lz = halfHall - x;
+                              const lz = (doorHcx + halfHall) - x;
                               const feetY = playerY - 1.6;
 
                               if (lx > 0.75 - collisionMargin && lx < 2.85 + collisionMargin && lz > -5.0 - collisionMargin && lz < -2.4 + collisionMargin) {
@@ -3232,7 +3405,7 @@ export default function App() {
                                   const isInsidePanel = (lx > lxMin && lx < lxMax && lz > lzMin && lz < lzMax);
                                   if (isInsidePanel) {
                                       const oldLx = oldZ - roomZ;
-                                      const oldLz = halfHall - oldX;
+                                      const oldLz = (doorHcx + halfHall) - oldX;
                                       const isOldInsidePanel = (oldLx > lxMin && oldLx < lxMax && oldLz > lzMin && oldLz < lzMax);
                                       if (!isOldInsidePanel) {
                                           return false;
@@ -3247,11 +3420,13 @@ export default function App() {
               return false;
           };
 
-          if (!isValidPosition(newX, oldZ)) {
-              camera.position.x = oldX;
-          }
-          if (!isValidPosition(camera.position.x, newZ)) {
-              camera.position.z = oldZ;
+          if (isValidPosition(newX, newZ)) {
+              camera.position.x = newX;
+              camera.position.z = newZ;
+          } else if (isValidPosition(newX, oldZ)) {
+              camera.position.x = newX;
+          } else if (isValidPosition(oldX, newZ)) {
+              camera.position.z = newZ;
           }
 
           if (isGrounded) {
@@ -3266,11 +3441,12 @@ export default function App() {
                 const roomZ = door.roomZ;
                 if (Math.abs(z - roomZ) > 3.2) continue;
 
-                const inLeft = door.isLeft && x < -hallwayWidth / 2 && x > -hallwayWidth / 2 - 5;
-                const inRight = !door.isLeft && x > hallwayWidth / 2 && x < hallwayWidth / 2 + 5;
+                const hallwayCenterX = getHallwayCenterX(roomZ, x);
+                const inLeft = door.isLeft && x < hallwayCenterX - hallwayWidth / 2 && x > hallwayCenterX - hallwayWidth / 2 - 5;
+                const inRight = !door.isLeft && x > hallwayCenterX + hallwayWidth / 2 && x < hallwayCenterX + hallwayWidth / 2 + 5;
                 if (inLeft || inRight) {
                     const lx = door.isLeft ? roomZ - z : z - roomZ;
-                    const lz = door.isLeft ? x + hallwayWidth/2 : hallwayWidth/2 - x;
+                    const lz = door.isLeft ? x - (hallwayCenterX - hallwayWidth/2) : (hallwayCenterX + hallwayWidth/2) - x;
                     if (lx > 0.75 && lx < 2.85 && lz > -5.0 && lz < -2.4) return 0.6; // Bed
                     if (lx > -2.9 && lx < -1.7 && lz > -4.9 && lz < -3.4) return 2.2; // Wardrobe
                 }
@@ -3464,13 +3640,14 @@ export default function App() {
             pos.y <= 0.05 ||
             pos.y >= hallwayHeight - 0.1 ||
             pos.z >= 4.9 ||
-            pos.z <= -hallwayLength + 5.1
+            pos.z <= -160.0
           ) {
             hit = true;
           } else {
             const halfHall = hallwayWidth / 2 - 0.1; // 1.65
-            if (Math.abs(pos.x) > halfHall) {
-              const isLeft = pos.x < 0;
+            const hallwayCenterX = getHallwayCenterX(pos.z, pos.x);
+            if (Math.abs(pos.x - hallwayCenterX) > halfHall) {
+              const isLeft = pos.x < hallwayCenterX;
               let inValidRoomSpace = false;
 
               for (let d = 0; d < doors.length; d++) {
@@ -3479,9 +3656,10 @@ export default function App() {
 
                 const rZ = door.roomZ;
                 if (pos.z >= rZ - 2.85 && pos.z <= rZ + 2.85) {
+                  const doorHcx = getHallwayCenterX(rZ, pos.x);
                   const inDoorwayX = isLeft
-                    ? (pos.x <= -1.65 && pos.x >= -2.15)
-                    : (pos.x >= 1.65 && pos.x <= 2.15);
+                    ? (pos.x <= doorHcx - 1.65 && pos.x >= doorHcx - 2.15)
+                    : (pos.x >= doorHcx + 1.65 && pos.x <= doorHcx + 2.15);
 
                   if (inDoorwayX) {
                     const inFrame = (pos.z >= rZ - 0.55 && pos.z <= rZ + 0.55 && pos.y <= 2.35);
@@ -3491,8 +3669,8 @@ export default function App() {
                     }
                   } else {
                     const inRoomX = isLeft
-                      ? (pos.x < -2.15 && pos.x >= -6.65)
-                      : (pos.x > 2.15 && pos.x <= 6.65);
+                      ? (pos.x < doorHcx - 2.15 && pos.x >= doorHcx - 6.65)
+                      : (pos.x > doorHcx + 2.15 && pos.x <= doorHcx + 6.65);
 
                     if (inRoomX) {
                       inValidRoomSpace = true;
@@ -3640,85 +3818,6 @@ export default function App() {
       fpsGroup.visible = true;
       renderer.clearDepth();
       renderer.render(fpsGroup, camera);
-
-      // --- Update 2D Minimap Canvas ---
-      if (minimapCanvasRef.current) {
-        const mCanvas = minimapCanvasRef.current;
-        const mCtx = mCanvas.getContext('2d');
-        if (mCtx) {
-          mCtx.clearRect(0, 0, mCanvas.width, mCanvas.height);
-
-          // Background
-          mCtx.fillStyle = '#111115';
-          mCtx.fillRect(0, 0, mCanvas.width, mCanvas.height);
-
-          const scaleZ = (mCanvas.height - 20) / 80.0;
-          const scaleX = (mCanvas.width - 20) / 12.0;
-          const centerX = mCanvas.width / 2;
-          const startY = 10;
-
-          // Hallway Corridor
-          const corridorX = centerX - 2 * scaleX;
-          const corridorY = startY;
-          const corridorW = 4 * scaleX;
-          const corridorH = 80 * scaleZ;
-          mCtx.fillStyle = '#222228';
-          mCtx.fillRect(corridorX, corridorY, corridorW, corridorH);
-          mCtx.strokeStyle = '#444455';
-          mCtx.lineWidth = 1;
-          mCtx.strokeRect(corridorX, corridorY, corridorW, corridorH);
-
-          // Rooms
-          for (let z = 2; z > -70; z -= 6) {
-            const ry = startY + (4 - z) * scaleZ;
-            mCtx.fillStyle = '#1a1a22';
-            mCtx.fillRect(centerX - 6 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
-            mCtx.strokeStyle = '#333344';
-            mCtx.strokeRect(centerX - 6 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
-
-            mCtx.fillRect(centerX + 2 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
-            mCtx.strokeRect(centerX + 2 * scaleX, ry, 4 * scaleX, 5.5 * scaleZ);
-          }
-
-          // Ghost point
-          const ghostMapY = startY + (4 - currentGhostSpawnZ) * scaleZ;
-          mCtx.fillStyle = ghostTriggered ? '#ff3333' : '#aa2222';
-          mCtx.beginPath();
-          mCtx.arc(centerX, ghostMapY, 3.5, 0, Math.PI * 2);
-          mCtx.fill();
-          if (ghostTriggered) {
-            mCtx.strokeStyle = '#ff9999';
-            mCtx.lineWidth = 1.5;
-            mCtx.stroke();
-          }
-
-          // Player position & direction
-          const pX = camera.position.x;
-          const pZ = camera.position.z;
-          const playerMapX = centerX + pX * scaleX;
-          const playerMapY = startY + (4 - pZ) * scaleZ;
-
-          camera.getWorldDirection(tempCamWorldDir);
-          const playerAngle = Math.atan2(tempCamWorldDir.x, tempCamWorldDir.z);
-
-          mCtx.save();
-          mCtx.translate(playerMapX, playerMapY);
-          mCtx.rotate(-playerAngle);
-
-          mCtx.fillStyle = '#00ffff';
-          mCtx.beginPath();
-          mCtx.moveTo(0, -5);
-          mCtx.lineTo(-4, 4);
-          mCtx.lineTo(4, 4);
-          mCtx.closePath();
-          mCtx.fill();
-          mCtx.strokeStyle = '#ffffff';
-          mCtx.lineWidth = 1;
-          mCtx.stroke();
-
-          mCtx.restore();
-        }
-      }
     };
 
     animate();
@@ -3767,14 +3866,7 @@ export default function App() {
         <p className="mt-12 text-sm text-red-900 font-sans tracking-normal">CẢNH BÁO: Có ánh sáng nhấp nháy và âm thanh bất ngờ</p>
       </div>
 
-      {/* 2D Minimap Overlay in Top-Left Corner */}
-      <div className="absolute top-6 left-6 pointer-events-none z-10 flex flex-col items-center bg-black/85 backdrop-blur-md p-2.5 rounded-2xl border border-white/20 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
-        <div className="text-white/80 font-sans text-[10px] tracking-widest font-semibold mb-1.5 uppercase">BẢN ĐỒ MÊ CUNG</div>
-        <canvas ref={minimapCanvasRef} width={120} height={140} className="rounded-lg border border-white/10 bg-[#0d0d12]" />
-        <div className="text-white/60 font-sans text-[9px] mt-1.5 text-center leading-tight">
-          [1,2,3] Đổi Phép • [WASD] Di chuyển
-        </div>
-      </div>
+      {/* Wall Symbols Guiding to the Brightest Exit */}
 
       {/* Magic Skill Bar HUD Overlay (Small Vertical Squares Centered Right) */}
       <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-auto z-20 flex flex-col items-center gap-3 bg-black/80 backdrop-blur-md p-3 rounded-2xl border border-white/15 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">

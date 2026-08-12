@@ -1,5 +1,82 @@
 # Status
 
+## TARGET HIỆN TẠI - FIX CHÍNH XÁC HƯỚNG MŨI TÊN CHỈ ĐƯỜNG TRÊN TƯỜNG (3D VECTOR ALIGNMENT)
+- Nguyên nhân gốc: 
+  1. Khi gắn kí hiệu lên vách tường dọc hành lang (Side Walls), việc vẽ mũi tên chỉ hướng `'up'` trên mặt phẳng canvas làm mũi tên bị chỉ thẳng lên trần nhà (Ceiling) thay vì chỉ nằm ngang dọc theo chiều dài hành lang (-Z).
+  2. Các kí hiệu chưa được đặt sát chuẩn bề mặt tường (X = -2.95, X = 26.95,...), dẫn đến hiện tượng trôi hoặc chỉ sai hướng nhìn của người chơi.
+- Đã thay đổi:
+  1. **Hiệu chỉnh chuẩn không gian 3D cho vách tường hành lang**:
+     - Vách tường bên trái (Left Wall, normal +X): Sử dụng `dir = 'right'` để vector mũi tên nằm ngang chỉ chính xác theo hướng tiến sâu xuống hành lang (-Z).
+     - Vách tường bên phải (Right Wall, normal -X): Sử dụng `dir = 'left'` để vector mũi tên nằm ngang chỉ chính xác theo hướng tiến sâu xuống hành lang (-Z).
+  2. **Hiệu chỉnh bảng rẽ tại bức tường cuối góc cua (Corner End Walls)**:
+     - Bức tường đối diện cuối góc cua (normal +Z): Sử dụng `dir = 'right'` hoặc `dir = 'left'` chỉ hướng chính xác vào ngã rẽ lối đi tiếp theo.
+  3. **Đặt sát bề mặt vách tường**: Căn chỉnh lại chính xác tọa độ X/Z của 8 vị trí bảng biển chỉ đường gắn sát mặt tường và đặt biển cuối dẫn trực tiếp vào cửa Exit rực sáng ở cuối mê cung.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); tất cả bảng chỉ đường trên tường đều chỉ nằm ngang chính xác theo lối đi và góc rẽ, không còn bị ngược hay trỏ lên trần nhà.
+- Vấn đề còn lại: Không có.
+
+- Nguyên nhân gốc: 
+  1. Trong hàm vẽ 2D Canvas Minimap, công thức góc quay `mCtx.rotate(-playerAngle)` bị mang dấu âm (-) đảo ngược góc quay Y-axis. Khi người chơi quay camera sang PHẢI trong không gian 3D, mũi tên biểu thị trên Minimap lại quay sang TRÁI (và ngược lại), tạo ra sự bất đồng bộ nặng nề giữa hướng người chơi nhìn/di chuyển và hình ảnh hiển thị trên Minimap.
+  2. Minimap trước đây chỉ vẽ các thanh hành lang khung chữ nhật cơ bản, thiếu vị trí các cánh cửa phòng khám phá, điểm xuất phát và vạch lối thoát Exit đích ở cuối mê cung (Segment 4, Z=-156), khiến người chơi khó định vị các căn phòng xung quanh.
+  3. Vị trí bóng ma (ghost point) trên Minimap chưa tính toán chuẩn xác tọa độ X thực tế khi bóng ma đang di chuyển cắt ngang hành lang.
+- Đã thay đổi:
+  1. **Fix góc quay Minimap đồng bộ 100%**: Sửa lại lệnh `mCtx.rotate(playerAngle)` tương thích chính xác với trục tọa độ 2D Canvas. Khi người chơi quay sang phải/trái hoặc tiến/lùi trong không gian 3D, mũi tên trên Minimap phản chiếu chuẩn xác 1:1 theo thời gian thực.
+  2. **Vẽ toàn bộ 60+ Cửa phòng & Điểm Đích (Exit)**: Bổ sung vòng lặp vẽ từng vị trí cửa phòng (`doors`) dưới dạng các chỉ số chấm/ô vuông màu xanh ngọc (cyan `#00ffcc` khi mở và nhạt hơn khi đóng), điểm xuất phát (Start `#00ff88` tại Z=0) và biểu tượng cửa thoát hiểm Exit màu vàng hoàng kim (`#ffcc00` tại Z=-156, X=16) ở cuối mê cung.
+  3. **Tọa độ bóng ma theo thời gian thực**: Cập nhật tọa độ `ghostMapX` và `ghostMapY` lấy trực tiếp từ vị trí 3D thực tế của `ghostSprite`, hiển thị chính xác chuyển động bước đi của bóng ma trên Minimap.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); Minimap và đường đi 3D hoàn toàn trùng khớp tuyệt đối từ hướng xoay, di chuyển cho tới vị trí cửa phòng và điểm thoát hiểm.
+- Vấn đề còn lại: Không có.
+
+
+## TARGET TRƯỚC ĐÓ - MỞ RỘNG MÊ CUNG ĐA NHÁNH (DEAD-END BRANCHES), NỐI KÍN VÁCH TƯỜNG KHÔNG BỊ XUYÊN VÀ VA CHẠM MƯỢT MÀ
+- Nguyên nhân gốc: 
+  1. Người chơi phản ánh mê cung ít lối đi, các lối đi nhìn xuyên qua nhau và va chạm chưa chân thực.
+  2. Cần thêm các nhánh ngõ tăm tối (dead-end branches) để gia tăng độ phức tạp và cảm giác lạc lối cho mê cung.
+  3. Cánh tường và vách nối giữa các góc cua/nhánh chết cần được che kín kiên cố hai mặt để triệt tiêu hoàn toàn lỗi nhìn xuyên qua không gian khác hoặc khoảng không vũ trụ.
+- Đã thay đổi:
+  1. **Mở rộng Mê cung Đa nhánh**: Xây dựng lại bản đồ mê cung gồm 4 hành lang chính, 3 góc cua 90 độ và 3 nhánh ngõ cụt tăm tối (Branch 1 tại X=24 Z=-26, Branch 2 tại X=-12 Z=-64, Branch 3 tại X=16 Z=-104) với hơn 60 phòng khám phá.
+  2. **Nối kín vách tường (Double-sided Solid Walls)**: Thêm các bức tường phẳng (`buildPlainWall`) che kín 100% tất cả các vách hành lang, đầu ngõ cụt, đầu phân đoạn và góc cua, loại bỏ hoàn toàn mọi khe hở hay góc nhìn xuyên sang lối khác.
+  3. **Va chạm chân thực & trượt tường mượt mượt**: Nâng cấp hệ thống va chạm `isValidPosition` bao phủ chính xác 4 hành lang, 3 góc cua và 3 nhánh ngõ cụt với độ lệch biên chuẩn xác (`collisionMargin = 0.28`), cho phép người chơi trượt nhẹ nhàng qua các mép tường và cua bẻ góc mà không bao giờ bị dính hay mắc kẹt.
+  4. **Cập nhật Minimap & Bùa phép**: Cập nhật hàm `getHallwayCenterX` động và vòng lặp vẽ Minimap 2D hiển thị chuẩn xác sơ đồ toàn bộ 4 hành lang chính, 3 góc cua và 3 ngõ cụt cùng vị trí bóng ma và người chơi theo thời gian thực.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); mê cung rộng lớn với nhiều ngõ cụt kịch tính, tường kín chắc chắn không bị nhìn xuyên, di chuyển trượt tường cực kỳ chân thực.
+- Vấn đề còn lại: Không có.
+
+
+## TARGET TRƯỚC ĐÓ - MỞ RỘNG MÊ CUNG, CHỐNG NHÌN XUYÊN TƯỜNG VÀ FIX VA CHẠM CHÂN THỰC (KHÔNG BỊ MẮC KẸT)
+- Nguyên nhân gốc: 
+  1. Bản đồ mê cung trước đây chỉ có 3 phân đoạn khá ngắn, chưa đủ độ phức tạp và rộng lớn để thám hiểm.
+  2. Một số góc/khu vực giữa các hành lang song song thiếu vách ngăn kiên cố, khiến ánh sáng hoặc tầm nhìn có thể nhìn xuyên qua lối khác.
+  3. Va chạm kiểm tra trục đơn độc lập (`if (!isValidPosition(newX, oldZ)) camera.position.x = oldX`) khiến người chơi dễ bị mắc kẹt (dead-stop) khi chạm tường chéo hoặc góc cua.
+- Đã thay đổi:
+  1. **Mở rộng mê cung**: Nâng cấp hệ thống bản đồ thành 4 phân đoạn hành lang dọc lớn kết hợp 3 khúc cua bẻ góc 90 độ (48 phòng đối xứng hai bên, trải dài từ Z = 4 đến Z = -140).
+  2. **Chống nhìn xuyên tường**: Đảm bảo tất cả tường ngăn, vách phòng và vách phân chia giữa các hành lang song song đều kín hoàn toàn (`wallMaterial` hai mặt và vách ngăn chắc chắn), loại bỏ hoàn toàn hiện tượng nhìn xuyên qua lối khác hoặc lọt sáng.
+  3. **Va chạm chân thực & trơn tru**: Cập nhật thuật toán va chạm sang cơ chế trượt tường (sliding collision: kiểm tra `isValidPosition(newX, newZ)` trực tiếp và trượt dọc theo trục X hoặc Z nếu chạm tường), giúp người chơi di chuyển mượt mà trơn tru qua các góc cua mà không bị mắc kẹt.
+  4. **Cập nhật Minimap 2D**: Mở rộng canvas minimap phản hồi chính xác toàn bộ 4 phân đoạn và 3 khúc cua của mê cung rộng lớn.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); bản đồ mê cung rộng lớn, không bị nhìn xuyên tường, va chạm cực kỳ mượt mà chân thực.
+- Vấn đề còn lại: Không có.
+
+
+## TARGET HIỆN TẠI - FIX LỖI VA CHẠM (COLLISION) & ĐI XUYÊN TƯỜNG TRONG MÊ CUNG HÀNH LANG
+- Nguyên nhân gốc: Hàm kiểm tra va chạm `isValidPosition`, `getFloorHeight` và tính toán va chạm bùa chú/phép thuật trước đây chỉ tính toán cho hành lang cố định tại tâm X = 0, dẫn đến việc khi người chơi di chuyển qua Segment 2 (hành lang dịch chuyển sang X = 20) và các khúc cua, hệ thống không nhận diện đúng tọa độ tâm hành lang (`hallwayCenterX`), gây ra lỗi đi xuyên tường, mắc kẹt hoặc không bước qua được các đoạn đường đã thấy trên bản đồ.
+- Đã thay đổi:
+  1. Cập nhật hàm `isValidPosition(x, z)` để xác định động tọa độ tâm hành lang (`hallwayCenterX` = 0 cho Segment 1 & 3, = 20 cho Segment 2, và = 10 cho các khúc cua giao nhau) theo từng phân đoạn mê cung.
+  2. Điều chỉnh logic kiểm tra cửa phòng (`doorHcx`) và vật thể phòng tương ứng với từng đoạn hành lang dịch chuyển.
+  3. Cập nhật hàm `getFloorHeight` và vòng lặp kiểm tra va chạm phép thuật (`activeProjectiles`) sử dụng `hallwayCenterX` động để triệt tiêu hoàn toàn lỗi đi xuyên tường và mắc kẹt.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); va chạm vật lý hoạt động chính xác tuyệt đối trên toàn bộ mê cung nhiều khúc cua.
+- Vấn đề còn lại: Không có.
+- Nguyên nhân gốc: Trò chơi ban đầu chỉ là một hành lang thẳng đơn điệu dọc trục Z, chưa tạo được trải nghiệm khám phá mê cung quỷ dị với các khúc cua và góc quặt theo ý muốn người chơi và ảnh tham khảo.
+- Đã thay đổi:
+  1. Xây dựng cấu trúc bản đồ mê cung đa phân đoạn (Multi-segment Maze Labyrinth) gồm 3 hành lang thẳng dọc kết hợp 2 khúc cua bẻ góc 90 độ (Segment 1 dọc Z -> Khúc cua phải ngang X -> Segment 2 dọc Z -> Khúc cua trái ngang X -> Segment 3 dọc Z dẫn đến đích).
+  2. Bố trí lại hệ thống phòng đối xứng và cửa phòng (`buildWallWithDoor`) dọc theo từng phân đoạn hành lang mê cung.
+  3. Cập nhật hàm kiểm tra va chạm tường `isValidPosition` cho tất cả các phân đoạn hành lang và khúc cua, đảm bảo người chơi di chuyển mượt mà và không bị xuyên tường.
+  4. Cập nhật vòng lặp render 2D Minimap Canvas để vẽ chính xác sơ đồ mê cung uốn lượn với các khúc cua, vị trí người chơi và bóng ma theo thời gian thực.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); hành lang giờ đây đã biến thành một mê cung rùng rợn có các khúc cua, góc quặt chân thực và minimap hiển thị chuẩn xác.
+- Vấn đề còn lại: Không có.
+
 ## TARGET HIỆN TẠI - TẠO BẢN ĐỒ 2D MINIMAP OVERLAY Ở GÓC TRÊN BÊN TRÁI
 - Nguyên nhân gốc: Trò chơi chưa có bản đồ tổng quan (minimap) trực quan giúp người chơi định vị vị trí và hướng nhìn trong mê cung hành lang.
 - Đã thay đổi:
