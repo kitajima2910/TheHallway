@@ -1022,7 +1022,23 @@ export default function App() {
     const activeImpactLights: ImpactLightItem[] = [];
 
     const spellTargetMeshes: THREE.Object3D[] = [];
-    const roomLightsList: { light: THREE.PointLight, worldZ: number }[] = [];
+    const roomLightsList: { worldPos: THREE.Vector3, worldZ: number }[] = [];
+    const roomGroupsList: { group: THREE.Group, z: number }[] = [];
+
+    const MAX_ROOM_LIGHTS = 8;
+    const roomLightPool: THREE.PointLight[] = [];
+    for (let i = 0; i < MAX_ROOM_LIGHTS; i++) {
+        const poolLight = new THREE.PointLight(0xffaa44, 0, 4.5);
+        // Do not set visible = false, keep them active to avoid shader recompile
+        scene.add(poolLight);
+        roomLightPool.push(poolLight);
+    }
+
+    const tempTrailOffset = new THREE.Vector3();
+    const tempTrailVel = new THREE.Vector3();
+    const tempCastSpawnPos = new THREE.Vector3();
+    const tempCastRayDir = new THREE.Vector3();
+    const nearbySpellTargets: THREE.Object3D[] = [];
 
     const MAX_DYNAMIC_LIGHTS = 6;
     const lightPool: { light: THREE.PointLight, inUse: boolean }[] = [];
@@ -1040,7 +1056,6 @@ export default function App() {
             item.light.color.setHex(color);
             item.light.intensity = intensity;
             item.light.distance = distance;
-            item.light.visible = true;
             return item.light;
         }
         return null;
@@ -1052,7 +1067,6 @@ export default function App() {
         if (item) {
             item.inUse = false;
             item.light.intensity = 0;
-            item.light.visible = false;
         }
     };
 
@@ -1145,73 +1159,93 @@ export default function App() {
     const sharedBoltMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const sharedOuterBoltMat = new THREE.MeshBasicMaterial({ color: 0x6644ff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
 
-    // --- Pre-allocated Zero-GC Particle Pool ---
+    // --- Pre-allocated Zero-GC Fireball Pool ---
+    interface PooledFireball {
+      group: THREE.Group;
+      inUse: boolean;
+    }
+    const fireballPoolGroup = new THREE.Group();
+    scene.add(fireballPoolGroup);
+    const fireballPool: PooledFireball[] = [];
+
+    for (let i = 0; i < 4; i++) {
+      const fbGroup = new THREE.Group();
+      const coreMesh = new THREE.Mesh(fireballCoreGeo, fireballCoreMat);
+      const mantleMesh = new THREE.Mesh(fireballMantleGeo, fireballMantleMat);
+      const flameRing1 = new THREE.Mesh(fireballRingGeo, fireballRingMat);
+      const flameRing2 = new THREE.Mesh(fireballRingGeo, fireballRingMat);
+      flameRing2.rotation.x = Math.PI / 2;
+      fbGroup.add(coreMesh, mantleMesh, flameRing1, flameRing2);
+      fbGroup.visible = false;
+      fireballPoolGroup.add(fbGroup);
+      fireballPool.push({ group: fbGroup, inUse: false });
+    }
+
+    const getFreeFireballGroup = () => {
+      let item = fireballPool.find(f => !f.inUse);
+      if (!item) {
+        item = fireballPool[0];
+      }
+      item.inUse = true;
+      item.group.visible = true;
+      return item.group;
+    };
+
+    const releaseFireballGroup = (group: THREE.Object3D) => {
+      group.visible = false;
+      const item = fireballPool.find(f => f.group === group);
+      if (item) {
+        item.inUse = false;
+      }
+    };
+
+    // --- Pre-allocated Zero-GC Particle Pool (Isolated materials: 0 runtime material switching) ---
     const particlePoolGroup = new THREE.Group();
     scene.add(particlePoolGroup);
 
     const particlePool: PooledParticle[] = [];
 
-    // Pre-create 50 spark meshes
-    for (let i = 0; i < 50; i++) {
-      const pMesh = new THREE.Mesh(sharedSparkGeo, sparkBaseMat1);
-      pMesh.visible = false;
-      particlePoolGroup.add(pMesh);
-      particlePool.push({
-        mesh: pMesh,
-        velocity: new THREE.Vector3(),
-        lifetime: 0,
-        maxLifetime: 1,
-        startScale: 1,
-        endScale: 0.1,
-        inUse: false
-      });
-    }
+    const createSubPool = (count: number, geo: THREE.BufferGeometry, mat: THREE.Material, isSprite = false) => {
+      const subList: PooledParticle[] = [];
+      for (let i = 0; i < count; i++) {
+        const mesh = isSprite ? new THREE.Sprite(mat as THREE.SpriteMaterial) : new THREE.Mesh(geo, mat);
+        mesh.visible = false;
+        particlePoolGroup.add(mesh);
+        const item: PooledParticle = {
+          mesh,
+          velocity: new THREE.Vector3(),
+          lifetime: 0,
+          maxLifetime: 1,
+          startScale: 1,
+          endScale: 0.1,
+          inUse: false
+        };
+        particlePool.push(item);
+        subList.push(item);
+      }
+      return subList;
+    };
 
-    // Pre-create 20 shockwave ring meshes
-    for (let i = 0; i < 20; i++) {
-      const rMesh = new THREE.Mesh(sharedRingGeo, ringBaseMat1);
-      rMesh.visible = false;
-      particlePoolGroup.add(rMesh);
-      particlePool.push({
-        mesh: rMesh,
-        velocity: new THREE.Vector3(),
-        lifetime: 0,
-        maxLifetime: 1,
-        startScale: 0.5,
-        endScale: 3.5,
-        inUse: false
-      });
-    }
+    const fireSparkPool = createSubPool(25, sharedSparkGeo, sparkBaseMat1);
+    const iceSparkPool = createSubPool(25, sharedSparkGeo, sparkBaseMat2);
+    const lightningSparkPool = createSubPool(25, sharedSparkGeo, sparkBaseMat3);
 
-    // Pre-create 40 drop sprite meshes
-    for (let i = 0; i < 40; i++) {
-      const dMesh = new THREE.Sprite(silverIceDropMat);
-      dMesh.visible = false;
-      particlePoolGroup.add(dMesh);
-      particlePool.push({
-        mesh: dMesh,
-        velocity: new THREE.Vector3(),
-        lifetime: 0,
-        maxLifetime: 0.5,
-        startScale: 0.35,
-        endScale: 0.35,
-        inUse: false
-      });
-    }
+    const fireRingPool = createSubPool(8, sharedRingGeo, ringBaseMat1);
+    const iceRingPool = createSubPool(8, sharedRingGeo, ringBaseMat2);
+    const lightningRingPool = createSubPool(8, sharedRingGeo, ringBaseMat3);
 
-    const getFreeParticle = (isRing: boolean, isDrop: boolean) => {
-      let p = particlePool.find(item => !item.inUse && (
-        isRing ? (item.mesh as THREE.Mesh).geometry === sharedRingGeo :
-        isDrop ? item.mesh instanceof THREE.Sprite :
-        (item.mesh as THREE.Mesh).geometry === sharedSparkGeo
-      ));
+    const iceDropPool = createSubPool(25, sharedSparkGeo, silverIceDropMat, true);
+
+    const getFreeParticle = (type: number, isRing: boolean, isDrop: boolean) => {
+      const targetSubPool = isDrop
+        ? iceDropPool
+        : isRing
+        ? (type === 2 ? iceRingPool : type === 3 ? lightningRingPool : fireRingPool)
+        : (type === 2 ? iceSparkPool : type === 3 ? lightningSparkPool : fireSparkPool);
+
+      let p = targetSubPool.find(item => !item.inUse);
       if (!p) {
-        // Recycle oldest in-use particle if pool full
-        p = particlePool.find(item => (
-          isRing ? (item.mesh as THREE.Mesh).geometry === sharedRingGeo :
-          isDrop ? item.mesh instanceof THREE.Sprite :
-          (item.mesh as THREE.Mesh).geometry === sharedSparkGeo
-        ));
+        p = targetSubPool[0];
       }
       if (p) {
         p.inUse = true;
@@ -1367,11 +1401,10 @@ export default function App() {
       }
 
       // Expanding Shockwave Ring (Pooled)
-      const ringParticle = getFreeParticle(true, false);
+      const ringParticle = getFreeParticle(type, true, false);
       if (ringParticle) {
         ringParticle.mesh.position.copy(pos);
         ringParticle.mesh.lookAt(camera.position);
-        (ringParticle.mesh as THREE.Mesh).material = (type === 2 ? ringBaseMat2 : type === 3 ? ringBaseMat3 : ringBaseMat1);
         ringParticle.velocity.set(0, 0, 0);
         ringParticle.startScale = 0.5;
         ringParticle.endScale = 3.5;
@@ -1380,10 +1413,9 @@ export default function App() {
 
       // Ember / Ice / Lightning Spark Particles (Pooled)
       for (let i = 0; i < count; i++) {
-        const spark = getFreeParticle(false, false);
+        const spark = getFreeParticle(type, false, false);
         if (spark) {
           spark.mesh.position.copy(pos);
-          (spark.mesh as THREE.Mesh).material = sparkMat;
           spark.velocity.set(
             (Math.random() - 0.5) * 5,
             (Math.random() - 0.2) * 4,
@@ -1407,42 +1439,24 @@ export default function App() {
       spellRecoil = 1.0; // Trigger recoil kick
       playSpellSound(currentSkill);
 
-      // Get origin position from staff top orb
-      const spawnPos = new THREE.Vector3();
-      orb.getWorldPosition(spawnPos);
+      // Get origin position from staff top orb (Zero-GC)
+      orb.getWorldPosition(tempCastSpawnPos);
 
-      // Raycast vector direction from camera center
-      const rayDirection = new THREE.Vector3();
-      camera.getWorldDirection(rayDirection);
+      // Raycast vector direction from camera center (Zero-GC)
+      camera.getWorldDirection(tempCastRayDir);
 
       if (currentSkill === 1) {
         // --- SKILL 1: HỎA CẦU PHÁP SƯ CHINH ĐỒ (Zhengtu Fireball) ---
-        const fbGroup = new THREE.Group();
-        fbGroup.position.copy(spawnPos);
-
-        // Glowing Yellow-Gold Inner Core
-        const coreMesh = new THREE.Mesh(fireballCoreGeo, fireballCoreMat);
-        fbGroup.add(coreMesh);
-
-        // Raging Outer Fire Mantle
-        const mantleMesh = new THREE.Mesh(fireballMantleGeo, fireballMantleMat);
-        fbGroup.add(mantleMesh);
-
-        // Dual Rotating Fire Rings (Horizontal & Vertical)
-        const flameRing1 = new THREE.Mesh(fireballRingGeo, fireballRingMat);
-        const flameRing2 = new THREE.Mesh(fireballRingGeo, fireballRingMat);
-        flameRing2.rotation.x = Math.PI / 2;
-        fbGroup.add(flameRing1, flameRing2);
+        const fbGroup = getFreeFireballGroup();
+        fbGroup.position.copy(tempCastSpawnPos);
 
         const pLight = getFreeLight(0xff5500, 5, 8);
         if (pLight) {
-          pLight.position.copy(spawnPos);
+          pLight.position.copy(tempCastSpawnPos);
         }
 
-        scene.add(fbGroup);
-
         const speed = 22;
-        const velocity = rayDirection.clone().multiplyScalar(speed);
+        const velocity = tempCastRayDir.clone().multiplyScalar(speed);
 
         activeProjectiles.push({
           mesh: fbGroup,
@@ -1459,10 +1473,18 @@ export default function App() {
           releaseLight(activeIceAoE.light);
         }
 
+        nearbySpellTargets.length = 0;
+        for (let i = 0; i < spellTargetMeshes.length; i++) {
+          const m = spellTargetMeshes[i];
+          if (m.visible && (!m.parent || m.parent.visible !== false)) {
+            nearbySpellTargets.push(m);
+          }
+        }
+
         raycaster.setFromCamera(center, camera);
-        const intersects = raycaster.intersectObjects(spellTargetMeshes, false);
+        const intersects = raycaster.intersectObjects(nearbySpellTargets, false);
         
-        let targetPoint = spawnPos.clone().add(rayDirection.clone().multiplyScalar(15));
+        let targetPoint = tempCastSpawnPos.clone().add(tempCastRayDir.clone().multiplyScalar(15));
         if (intersects.length > 0) {
           for (let hit of intersects) {
             if (hit.distance > 0.5) {
@@ -1496,10 +1518,18 @@ export default function App() {
 
       } else if (currentSkill === 3) {
         // --- SKILL 3: LÔI ĐIỆN (Lightning Strike) ---
-        raycaster.setFromCamera(center, camera);
-        const intersects = raycaster.intersectObjects(spellTargetMeshes, false);
+        nearbySpellTargets.length = 0;
+        for (let i = 0; i < spellTargetMeshes.length; i++) {
+          const m = spellTargetMeshes[i];
+          if (m.visible && (!m.parent || m.parent.visible !== false)) {
+            nearbySpellTargets.push(m);
+          }
+        }
 
-        let targetPoint = spawnPos.clone().add(rayDirection.clone().multiplyScalar(25));
+        raycaster.setFromCamera(center, camera);
+        const intersects = raycaster.intersectObjects(nearbySpellTargets, false);
+
+        let targetPoint = tempCastSpawnPos.clone().add(tempCastRayDir.clone().multiplyScalar(25));
         if (intersects.length > 0) {
           for (let hit of intersects) {
             if (hit.distance > 0.5) {
@@ -1869,9 +1899,7 @@ export default function App() {
         flower.rotation.y = -Math.PI / 2;
         parentGroup.add(flower);
 
-        const roomLight = new THREE.PointLight(0xffaa44, 8, 4.5); // Warm light from lamp
-        roomLight.position.set(roomW/2 - 0.5, 2.2, -roomD + 1.5);
-        parentGroup.add(roomLight);
+        const roomLightPos = new THREE.Vector3(roomW/2 - 0.5, 2.2, -roomD + 1.5);
 
         // Blood splatters in the room
         if (Math.random() > 0.3) {
@@ -1889,7 +1917,7 @@ export default function App() {
         // Randomly place debris objects (books, papers, broken glass) on the floor
         placeRoomDebris(parentGroup);
 
-        return roomLight;
+        return roomLightPos;
     };
 
     const createRoomNumberTexture = (numStr: string) => {
@@ -1981,10 +2009,8 @@ export default function App() {
 
         // Room number plaque on the door (chữ số màu trắng)
         const plateTex = createRoomNumberTexture(roomNumber);
-        const plateMat = new THREE.MeshStandardMaterial({
+        const plateMat = new THREE.MeshLambertMaterial({
             map: plateTex,
-            roughness: 0.3,
-            metalness: 0.5,
             polygonOffset: true,
             polygonOffsetFactor: -1,
             polygonOffsetUnits: -1
@@ -2009,16 +2035,18 @@ export default function App() {
 
         group.add(pivot);
 
-        const roomLight = buildRoom(group, isLeft);
+        const roomLightLocalPos = buildRoom(group, isLeft);
 
         group.position.set(x, 0, z);
         group.rotation.y = rotationY;
         scene.add(group);
         group.updateMatrixWorld(true);
 
-        const lightWorldPos = new THREE.Vector3();
-        roomLight.getWorldPosition(lightWorldPos);
-        roomLightsList.push({ light: roomLight, worldZ: lightWorldPos.z });
+        roomGroupsList.push({ group, z });
+
+        const lightWorldPos = roomLightLocalPos.clone();
+        lightWorldPos.applyMatrix4(group.matrixWorld);
+        roomLightsList.push({ worldPos: lightWorldPos, worldZ: lightWorldPos.z });
         
         doors.push({ mesh: door, pivot: pivot, isOpen: false, openOutwards: false, isLeft: isLeft, roomZ: z });
     };
@@ -2690,7 +2718,6 @@ export default function App() {
     // Briefly activate light pool lights during compile pass so shader program includes PointLight uniforms
     lightPool.forEach(item => {
       item.light.intensity = 1;
-      item.light.visible = true;
     });
 
     // Pre-compile full scene shaders & materials in one unified pass
@@ -2701,7 +2728,6 @@ export default function App() {
     scene.remove(dummySkillGroup);
     lightPool.forEach(item => {
       item.light.intensity = 0;
-      item.light.visible = false;
     });
 
     // Animation Loop
@@ -2709,6 +2735,8 @@ export default function App() {
     const speed = 2.5; // walking speed
     let time = 0;
     let frameId: number;
+    const tempCamWorldDir = new THREE.Vector3();
+    const nearbyDoorMeshes: THREE.Object3D[] = [];
 
     const animate = (timestamp?: number) => {
       frameId = requestAnimationFrame(animate);
@@ -2716,11 +2744,26 @@ export default function App() {
       const delta = Math.min(timer.getDelta(), 0.1); // Cap delta time
       time += delta;
 
-      // Distance-cull room lights to optimize WebGL shader overhead
+      // Dynamic room light assignment (Zero-GC, Zero-Shader-Recompile)
       const playerZ = camera.position.z;
+      let poolIdx = 0;
       for (let i = 0; i < roomLightsList.length; i++) {
         const item = roomLightsList[i];
-        item.light.visible = Math.abs(playerZ - item.worldZ) < 22;
+        if (Math.abs(playerZ - item.worldZ) < 18) {
+            if (poolIdx < MAX_ROOM_LIGHTS) {
+                roomLightPool[poolIdx].position.copy(item.worldPos);
+                roomLightPool[poolIdx].intensity = 8;
+                poolIdx++;
+            }
+        }
+      }
+      for (; poolIdx < MAX_ROOM_LIGHTS; poolIdx++) {
+          roomLightPool[poolIdx].intensity = 0;
+      }
+
+      for (let i = 0; i < roomGroupsList.length; i++) {
+        const item = roomGroupsList[i];
+        item.group.visible = Math.abs(playerZ - item.z) < 26;
       }
 
       // Subtly animate the light intensity
@@ -2730,9 +2773,8 @@ export default function App() {
       if (!ghostTriggered) {
           ghostTimer -= delta;
           if (ghostTimer <= 0) {
-              const camDir = new THREE.Vector3();
-              camera.getWorldDirection(camDir);
-              const lookDirZ = camDir.z < 0 ? -1 : 1;
+              camera.getWorldDirection(tempCamWorldDir);
+              const lookDirZ = tempCamWorldDir.z < 0 ? -1 : 1;
               
               // 1 room = 6 units. 3 rooms = 18 units.
               // Try spawning ahead (3.25 to 6.25 rooms away = 19.5 to 37.5 units)
@@ -2967,13 +3009,24 @@ export default function App() {
       });
 
       if (controls.isLocked) {
-        // Raycast for interactions
-        raycaster.setFromCamera(center, camera);
-        const intersects = raycaster.intersectObjects(doorMeshes, false);
-        
-        if (intersects.length > 0 && intersects[0].distance < 3) {
-            const doorMesh = intersects[0].object;
-            currentDoorData = doors.find(d => d.mesh === doorMesh) || null;
+        // Raycast for interactions (Optimized: only query doors within 3.5m)
+        const currentPZ = camera.position.z;
+        nearbyDoorMeshes.length = 0;
+        for (let i = 0; i < doors.length; i++) {
+            if (Math.abs(doors[i].roomZ - currentPZ) < 3.5) {
+                nearbyDoorMeshes.push(doors[i].mesh);
+            }
+        }
+        if (nearbyDoorMeshes.length > 0) {
+            raycaster.setFromCamera(center, camera);
+            const intersects = raycaster.intersectObjects(nearbyDoorMeshes, false);
+            
+            if (intersects.length > 0 && intersects[0].distance < 3) {
+                const doorMesh = intersects[0].object;
+                currentDoorData = doors.find(d => d.mesh === doorMesh) || null;
+            } else {
+                currentDoorData = null;
+            }
         } else {
             currentDoorData = null;
         }
@@ -2985,10 +3038,6 @@ export default function App() {
             } else {
                 interactTextRef.current.style.opacity = '0';
             }
-        }
-
-        if (audioCtx.state === 'suspended') {
-          audioCtx.resume();
         }
 
         const moveZ = Number(moveState.forward) - Number(moveState.backward);
@@ -3025,6 +3074,8 @@ export default function App() {
               for (let i = 0; i < doors.length; i++) {
                   const door = doors[i];
                   const roomZ = door.roomZ;
+                  if (Math.abs(z - roomZ) > 3.5) continue;
+
                   const doorMinZ = roomZ - doorWidth / 2 + collisionMargin;
                   const doorMaxZ = roomZ + doorWidth / 2 - collisionMargin;
                   
@@ -3136,9 +3187,11 @@ export default function App() {
         const getFloorHeight = (x: number, z: number) => {
             for (let i = 0; i < doors.length; i++) {
                 const door = doors[i];
-                const roomZ = door.pivot.parent!.position.z;
-                const inLeft = door.isLeft && x < -hallwayWidth / 2 && x > -hallwayWidth / 2 - 5 && z > roomZ - 3 && z < roomZ + 3;
-                const inRight = !door.isLeft && x > hallwayWidth / 2 && x < hallwayWidth / 2 + 5 && z > roomZ - 3 && z < roomZ + 3;
+                const roomZ = door.roomZ;
+                if (Math.abs(z - roomZ) > 3.2) continue;
+
+                const inLeft = door.isLeft && x < -hallwayWidth / 2 && x > -hallwayWidth / 2 - 5;
+                const inRight = !door.isLeft && x > hallwayWidth / 2 && x < hallwayWidth / 2 + 5;
                 if (inLeft || inRight) {
                     const lx = door.isLeft ? roomZ - z : z - roomZ;
                     const lz = door.isLeft ? x + hallwayWidth/2 : hallwayWidth/2 - x;
@@ -3254,29 +3307,14 @@ export default function App() {
         }
       }
 
-      // --- Update Player Lower Body (Váy đen lót xanh, Vớ trắng nơ đen & Giày Mary Jane khi Cúi Đầu) ---
-      const camWorldDir = new THREE.Vector3();
-      camera.getWorldDirection(camWorldDir);
-      const playerYaw = Math.atan2(-camWorldDir.x, -camWorldDir.z);
+      // --- Update Player Lower Body when Looking Down ---
+      camera.getWorldDirection(tempCamWorldDir);
+      const playerYaw = Math.atan2(-tempCamWorldDir.x, -tempCamWorldDir.z);
+      const lookDownFactor = -tempCamWorldDir.y;
 
-      // Hiển thị phần thân dưới và chân khi player nghiêng camera cúi xuống
-      const lookDownFactor = THREE.MathUtils.clamp((-camWorldDir.y) / 0.22, 0, 1);
-
-      if (lookDownFactor > 0.001) {
+      if (lookDownFactor > 0.15) {
         lowerBodyGroup.visible = true;
 
-        dressOuterMat.opacity = lookDownFactor;
-        dressInnerMat.opacity = lookDownFactor;
-        waistCapMat.opacity = lookDownFactor;
-        dressTrimMat.opacity = lookDownFactor;
-        skinLegMat.opacity = lookDownFactor;
-        stockingMat.opacity = lookDownFactor;
-        ribbonMat.opacity = lookDownFactor;
-        maryJaneShoeMat.opacity = lookDownFactor;
-        maryJaneSoleMat.opacity = lookDownFactor;
-        buckleMat.opacity = lookDownFactor;
-
-        // Đặt vị trí thân dưới ngay dưới camera eye để góc nhìn từ trên xuống thấy được đôi giày Mary Jane nhô ra rất rõ ràng
         const backOffset = 0.04;
         const posX = camera.position.x + Math.sin(playerYaw) * backOffset;
         const posZ = camera.position.z + Math.cos(playerYaw) * backOffset;
@@ -3319,23 +3357,22 @@ export default function App() {
         // Spawn trailing flame tail for Fireball (Skill 1 - Pooled)
         if (proj.type === 1) {
           for (let k = 0; k < 2; k++) {
-            const trailParticle = getFreeParticle(false, false);
+            const trailParticle = getFreeParticle(1, false, false);
             if (trailParticle) {
-              const offset = new THREE.Vector3(
+              tempTrailOffset.set(
                 (Math.random() - 0.5) * 0.08,
                 (Math.random() - 0.5) * 0.08,
                 (Math.random() - 0.5) * 0.08
               );
-              trailParticle.mesh.position.copy(proj.mesh.position).add(offset);
-              (trailParticle.mesh as THREE.Mesh).material = sparkBaseMat1;
+              trailParticle.mesh.position.copy(proj.mesh.position).add(tempTrailOffset);
 
-              trailParticle.velocity.copy(proj.velocity).multiplyScalar(-0.12).add(
-                new THREE.Vector3(
-                  (Math.random() - 0.5) * 0.6,
-                  (Math.random() - 0.2) * 0.6,
-                  (Math.random() - 0.5) * 0.6
-                )
+              trailParticle.velocity.copy(proj.velocity).multiplyScalar(-0.12);
+              tempTrailVel.set(
+                (Math.random() - 0.5) * 0.6,
+                (Math.random() - 0.2) * 0.6,
+                (Math.random() - 0.5) * 0.6
               );
+              trailParticle.velocity.add(tempTrailVel);
               trailParticle.startScale = 1.6;
               trailParticle.endScale = 0.1;
               trailParticle.maxLifetime = 0.18 + Math.random() * 0.08;
@@ -3397,11 +3434,15 @@ export default function App() {
         }
 
         if (hit || proj.lifetime >= proj.maxLifetime) {
-          spawnImpactParticles(pos.clone(), proj.type);
+          spawnImpactParticles(pos, proj.type);
           if (proj.light) {
             releaseLight(proj.light);
           }
-          scene.remove(proj.mesh);
+          if (proj.type === 1) {
+            releaseFireballGroup(proj.mesh);
+          } else {
+            scene.remove(proj.mesh);
+          }
           activeProjectiles.splice(i, 1);
         }
       }
@@ -3423,10 +3464,9 @@ export default function App() {
             p.mesh.visible = false;
 
             if (p.mesh.position.y <= 0) {
-              const spark = getFreeParticle(false, false);
+              const spark = getFreeParticle(2, false, false);
               if (spark) {
                 spark.mesh.position.set(p.mesh.position.x, 0.05, p.mesh.position.z);
-                (spark.mesh as THREE.Mesh).material = sparkBaseMat2;
                 spark.velocity.set(
                   (Math.random() - 0.5) * 2,
                   Math.random() * 2 + 0.5,
@@ -3473,7 +3513,7 @@ export default function App() {
         if (activeIceAoE.spawnTimer >= 0.12) {
           activeIceAoE.spawnTimer = 0;
           for (let i = 0; i < 3; i++) {
-            const drop = getFreeParticle(false, true);
+            const drop = getFreeParticle(2, false, true);
             if (drop) {
               const r = Math.random() * 1.4;
               const theta = Math.random() * Math.PI * 2;

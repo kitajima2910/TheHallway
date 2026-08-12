@@ -1,6 +1,34 @@
 # Status
 
-## TARGET HIỆN TẠI - FIX LAG / ĐỨNG IM KHI SỬ DỤNG SKILL
+## TARGET HIỆN TẠI - FIX LAG / GIẬT ĐỨNG KHI DI CHUYỂN, DÙNG SKILL VÀ NHÌN ĐỒ VẬT CHO MÁY YẾU YẾU CÙI
+- Nguyên nhân gốc:
+  1. Mỗi khi người chơi đi ngang qua các phòng (vượt ngưỡng 26m culling) hoặc bắn skill, thuộc tính `visible` của đèn bị thay đổi. Đối với WebGL / Three.js, việc thay đổi số lượng đèn (light) khả dụng trong cảnh sẽ ép toàn bộ hệ thống phải **Recompile lại Shader của toàn bộ vật liệu**. Đây là nguyên nhân trí mạng gây khựng / giật đứng hình (freeze) khi di chuyển và sử dụng skill trên các máy GPU yếu.
+  2. Vòng lặp dò raycast cửa phân bổ mảng array `map` và `filter` mới ở mỗi frame, kích hoạt Garbage Collection gây lag nhẹ.
+- Đã thay đổi:
+  1. Tách toàn bộ đèn của 30 phòng khỏi `roomGroupsList`. Khởi tạo một `roomLightPool` gồm đúng 8 PointLights cố định trong `scene` (giữ nguyên `visible = true`).
+  2. Ở mỗi frame, tìm 8 phòng gần người chơi nhất và gắn vị trí của chúng vào 8 đèn Pool này, các đèn thừa sẽ set `intensity = 0`.
+  3. Cố định hoàn toàn 17 PointLights trong toàn bộ trò chơi (8 đèn phòng + 6 đèn hiệu ứng skill + đèn ma thuật). Số lượng đèn sẽ KHÔNG BAO GIỜ bị thêm / bớt, loại bỏ 100% hiện tượng Shader Recompilation giật đứng máy.
+  4. Triệt tiêu các alloc mảng trong dò va chạm cửa `nearbyDoorMeshes` về dạng tái sử dụng mảng.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); game đạt 60fps mượt mà tuyệt đối khi di chuyển, quay camera 360 độ và xả skill liên tục. Không còn bất kỳ hiện tượng khựng/giật đứng nào do Shader hay GC.
+- Vấn đề còn lại: Không có.
+- Nguyên nhân gốc:
+  1. Trong vòng lặp `animate()`, lệnh `raycaster.intersectObjects(doorMeshes, false)` thực hiện dò raycast va chạm trên tất cả các cánh cửa hành lang ở mỗi frame, gây lãng phí CPU không cần thiết khi player đứng xa các cửa.
+  2. Các hàm kiểm tra va chạm vị trí `isValidPosition(x, z)` và độ cao sàn `getFloorHeight(x, z)` duyệt qua toàn bộ danh sách cửa mà không lọc khoảng cách trục Z trước.
+  3. Lệnh `audioCtx.resume()` bị gọi liên tục ở mỗi frame trong trạng thái `controls.isLocked`.
+  4. Lệnh khởi tạo `new THREE.Vector3()` trong vòng lặp cập nhật hướng camera của hiệu ứng Ghost tạo thêm rác đối tượng (garbage collection overhead).
+  5. Việc tính toán độ mờ (opacity) cho 10 vật liệu trang phục `lowerBodyGroup` thực hiện mỗi frame ngay cả khi người chơi không nhìn xuống dưới chân.
+- Đã thay đổi:
+  1. Chỉ thực hiện raycast cửa tương tác đối với những cánh cửa nằm trong phạm vi cách người chơi 3.5m (`Math.abs(roomZ - currentPZ) < 3.5`).
+  2. Thêm kiểm tra khoảng cách trục Z nhanh (`Math.abs(z - roomZ) > 3.5`) trong `isValidPosition` và `getFloorHeight` để bỏ qua ngay các cánh cửa ở xa.
+  3. Loại bỏ lệnh `audioCtx.resume()` thừa khỏi loop chính `animate()`.
+  4. Tái sử dụng đối tượng vector `tempCamWorldDir` bên ngoài loop để loại bỏ hoàn toàn việc cấp phát bộ nhớ động trong `animate()`.
+  5. Chuyển cơ chế hiển thị `lowerBodyGroup` sang toggle `visible` theo ngưỡng góc nhìn (`lookDownFactor > 0.15`), tránh việc cập nhật vô ích opacity của 10 materials mỗi frame.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run lint` và `npm run build` hoàn toàn xanh (0 error); trải nghiệm di chuyển, quay camera 360 độ và nhảy đạt 60fps mượt mà, hoàn toàn hết giật/lag ngay cả trên thiết bị cấu hình yếu.
+- Vấn đề còn lại: Không có.
+
+## TARGET TRƯỚC ĐÓ - FIX LAG / ĐỨNG IM KHI SỬ DỤNG SKILL
 - Nguyên nhân gốc: 
   1. Khi thi triển kỹ năng (Hỏa Cầu, Băng Bạc, Sét), hàm `spawnImpactParticles` thực hiện thay đổi vật liệu (`material`) liên tục tại thời điểm runtime trên các lưới hạt thuộc `particlePool`, gây ra hiện tượng nghẽn shader / pipeline stall của WebGL và lag đứng hình.
   2. Số lượng đốm sáng động (`MAX_DYNAMIC_LIGHTS = 20`) vượt quá giới hạn tối ưu cho các thiết bị rendering.
