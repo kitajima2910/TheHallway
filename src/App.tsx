@@ -80,6 +80,67 @@ const createGhostTexture = () => {
     return tex;
 };
 
+const createTalismanTexture = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+        ctx.fillStyle = '#ffecb3';
+        ctx.fillRect(0, 0, 256, 512);
+
+        for (let i = 0; i < 350; i++) {
+            ctx.fillStyle = Math.random() > 0.5 ? 'rgba(218, 165, 32, 0.2)' : 'rgba(255, 235, 150, 0.25)';
+            ctx.fillRect(Math.random() * 256, Math.random() * 512, 2, 2);
+        }
+
+        ctx.strokeStyle = '#c62828';
+        ctx.lineWidth = 8;
+        ctx.strokeRect(10, 10, 236, 492);
+        ctx.lineWidth = 3;
+        ctx.strokeRect(18, 18, 220, 476);
+
+        ctx.fillStyle = '#b71c1c';
+        ctx.strokeStyle = '#b71c1c';
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        ctx.font = 'bold 42px serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('敕令', 128, 75);
+
+        ctx.beginPath();
+        ctx.moveTo(128, 100);
+        ctx.lineTo(128, 400);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(70, 140);
+        ctx.quadraticCurveTo(180, 180, 80, 230);
+        ctx.quadraticCurveTo(200, 270, 100, 320);
+        ctx.quadraticCurveTo(170, 360, 128, 410);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(60, 180); ctx.lineTo(196, 180);
+        ctx.moveTo(60, 280); ctx.lineTo(196, 280);
+        ctx.moveTo(60, 350); ctx.lineTo(196, 350);
+        ctx.stroke();
+
+        ctx.fillStyle = '#d32f2f';
+        ctx.fillRect(96, 420, 64, 64);
+        ctx.fillStyle = '#ffcdd2';
+        ctx.font = 'bold 24px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('符', 128, 452);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+};
+
 const createBloodSplatterTexture = () => {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
@@ -2304,6 +2365,51 @@ export default function App() {
     scene.add(spotLight);
     scene.add(spotLight.target);
 
+    // Floating Talismans Setup (Bùa chú tối ưu hiệu năng, nhẹ mượt 60fps)
+    const talismanTex = createTalismanTexture();
+    const talismanMat = new THREE.MeshStandardMaterial({
+        map: talismanTex,
+        roughness: 0.5,
+        metalness: 0.1,
+        side: THREE.DoubleSide,
+        transparent: true,
+        emissive: 0xffb300,
+        emissiveIntensity: 0.35
+    });
+    const talismanGeo = new THREE.PlaneGeometry(0.2, 0.45);
+    const talismansList: {
+        mesh: THREE.Mesh;
+        basePos: THREE.Vector3;
+        floatSpeed: number;
+        floatAmplitude: number;
+        driftSpeed: number;
+        rotSpeed: THREE.Vector3;
+        phase: number;
+    }[] = [];
+
+    for (let i = 0; i < 16; i++) {
+        const talismanMesh = new THREE.Mesh(talismanGeo, talismanMat);
+        const posX = (Math.random() - 0.5) * 4.2;
+        const posY = 0.6 + Math.random() * 1.8;
+        const posZ = 3.0 - Math.random() * 68.0;
+        talismanMesh.position.set(posX, posY, posZ);
+        scene.add(talismanMesh);
+
+        talismansList.push({
+            mesh: talismanMesh,
+            basePos: new THREE.Vector3(posX, posY, posZ),
+            floatSpeed: 1.5 + Math.random() * 2.0,
+            floatAmplitude: 0.3 + Math.random() * 0.5,
+            driftSpeed: 1.5 + Math.random() * 3.0,
+            rotSpeed: new THREE.Vector3(
+                (Math.random() - 0.5) * 2.0,
+                (Math.random() - 0.5) * 3.0,
+                (Math.random() - 0.5) * 2.0
+            ),
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
     // Creepy Ghost Setup
     const ghostTex = createGhostTexture();
     const ghostMat = new THREE.SpriteMaterial({ map: ghostTex, transparent: true, opacity: 0 });
@@ -2546,6 +2652,30 @@ export default function App() {
               const walkBob = Math.sin(ghostProgress * Math.PI * 18) * 0.05;
               ghostSprite.position.set(currentX, 1.5 + walkBob, currentGhostSpawnZ);
           }
+      }
+
+      // Update wind-blown flying talismans (Bùa chú bay mượt mà 60fps)
+      for (let i = 0; i < talismansList.length; i++) {
+          const t = talismansList[i];
+          const pt = t.basePos;
+          
+          let currentZ = pt.z + (time * t.driftSpeed) % 70;
+          if (currentZ > 5) currentZ -= 75;
+          if (currentZ < -70) currentZ += 75;
+
+          const p = t.phase + time * t.floatSpeed;
+          
+          t.mesh.position.x = pt.x + Math.sin(p * 0.8) * 0.6 + Math.cos(time * 1.5 + i) * 0.2;
+          t.mesh.position.y = pt.y + Math.cos(p * 1.1) * 0.5 + Math.sin(time * 2.0 + i) * 0.15;
+          t.mesh.position.z = currentZ;
+
+          t.mesh.rotation.x = Math.sin(time * 5.0 + i) * 0.5 + Math.sin(p) * 0.3;
+          t.mesh.rotation.y = Math.cos(time * 4.0 + i * 0.5) * 1.0 + p * 0.2;
+          t.mesh.rotation.z = Math.sin(time * 6.0 + i) * 0.6 + Math.cos(p * 1.5) * 0.5;
+
+          // Subtle natural scale pulse for paper flutter effect
+          const flutter = 1.0 + Math.sin(time * 12.0 + i * 2.0) * 0.08;
+          t.mesh.scale.set(flutter, 1.0 / flutter, 1.0);
       }
 
       // Door animations
