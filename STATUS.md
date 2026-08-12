@@ -1,5 +1,14 @@
 # Status
 
+## TARGET HIỆN TẠI - UỐN CONG VÀ GẤP NẾP BÙA CHÚ NHƯ GIẤY THẬT
+- Nguyên nhân gốc: Bùa chú sử dụng `PlaneGeometry` phẳng thẳng đơ, thiếu độ cong tự nhiên, nếp gấp và mép cuộn như giấy bùa ngoài đời thật bay trong gió.
+- Đã thay đổi:
+  1. Thêm hàm `createBentTalismanGeometry` tạo hình học đa phân đoạn với 3 kiểu uốn cong khác nhau (`foldType`: cong cuộn tròn, gấp khúc nếp chính giữa, gấp mép & cong góc).
+  2. Tinh chỉnh animation bay phấp phới tự nhiên với dao động đa chiều sống động.
+- File đã sửa: `src/App.tsx`, `STATUS.md`.
+- Kết quả kiểm tra: `npm run build` thành công; bùa chú có độ cong, gấp nếp và bay lượn chân thực như giấy thật ở 60fps.
+- Vấn đề còn lại: Không có.
+
 ## TARGET HIỆN TẠI - TỐI ƯU HIỆN NĂNG BÙA CHÚ (FIX LAG 60FPS)
 - Nguyên nhân gốc: Vòng lặp cập nhật `posAttr` và gọi `posAttr.needsUpdate = true` trên 24 lưới hình học mỗi khung hình (CPU vertex manipulation) gây nghẽn CPU và hiện tượng giật/lag trong game.
 - Đã thay đổi:

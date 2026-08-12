@@ -2365,7 +2365,6 @@ export default function App() {
     scene.add(spotLight);
     scene.add(spotLight.target);
 
-    // Floating Talismans Setup (Bùa chú tối ưu hiệu năng, nhẹ mượt 60fps)
     const talismanTex = createTalismanTexture();
     const talismanMat = new THREE.MeshStandardMaterial({
         map: talismanTex,
@@ -2376,7 +2375,37 @@ export default function App() {
         emissive: 0xffb300,
         emissiveIntensity: 0.35
     });
-    const talismanGeo = new THREE.PlaneGeometry(0.2, 0.45);
+
+    const createBentTalismanGeometry = (foldType: number) => {
+        const geo = new THREE.PlaneGeometry(0.22, 0.48, 8, 16);
+        const pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            let vx = pos.getX(i);
+            let vy = pos.getY(i);
+            let vz = pos.getZ(i);
+
+            if (foldType === 0) {
+                // Type 0: Curved scroll / Cylindrical bend (Cong mượt như cuộn giấy)
+                vz += Math.sin((vx / 0.22 + 0.5) * Math.PI) * 0.05;
+                vx += Math.cos(vy * 3.0) * 0.012;
+            } else if (foldType === 1) {
+                // Type 1: Center crease fold (Gấp khúc nếp chính giữa thân bùa)
+                const distFromCenter = Math.abs(vx);
+                vz += (0.11 - distFromCenter) * 0.38;
+                vy += (Math.random() - 0.5) * 0.015;
+            } else {
+                // Type 2: Diagonal/Corner curl fold (Gấp mép & cong góc bay tự nhiên)
+                vz += Math.sin(vx * 12.0) * 0.025 + Math.cos(vy * 10.0) * 0.025;
+                if (vy > 0.15) {
+                    vz -= (vy - 0.15) * 0.15;
+                }
+            }
+            pos.setXYZ(i, vx, vy, vz);
+        }
+        geo.computeVertexNormals();
+        return geo;
+    };
+
     const talismansList: {
         mesh: THREE.Mesh;
         basePos: THREE.Vector3;
@@ -2385,9 +2414,12 @@ export default function App() {
         driftSpeed: number;
         rotSpeed: THREE.Vector3;
         phase: number;
+        foldType: number;
     }[] = [];
 
     for (let i = 0; i < 16; i++) {
+        const foldType = i % 3;
+        const talismanGeo = createBentTalismanGeometry(foldType);
         const talismanMesh = new THREE.Mesh(talismanGeo, talismanMat);
         const posX = (Math.random() - 0.5) * 4.2;
         const posY = 0.6 + Math.random() * 1.8;
@@ -2406,7 +2438,8 @@ export default function App() {
                 (Math.random() - 0.5) * 3.0,
                 (Math.random() - 0.5) * 2.0
             ),
-            phase: Math.random() * Math.PI * 2
+            phase: Math.random() * Math.PI * 2,
+            foldType
         });
     }
 
@@ -2654,7 +2687,7 @@ export default function App() {
           }
       }
 
-      // Update wind-blown flying talismans (Bùa chú bay mượt mà 60fps)
+      // Update wind-blown flying talismans (Bùa chú uốn cong, gấp khúc, bay phấp phới tự nhiên như giấy thật)
       for (let i = 0; i < talismansList.length; i++) {
           const t = talismansList[i];
           const pt = t.basePos;
@@ -2665,17 +2698,18 @@ export default function App() {
 
           const p = t.phase + time * t.floatSpeed;
           
-          t.mesh.position.x = pt.x + Math.sin(p * 0.8) * 0.6 + Math.cos(time * 1.5 + i) * 0.2;
-          t.mesh.position.y = pt.y + Math.cos(p * 1.1) * 0.5 + Math.sin(time * 2.0 + i) * 0.15;
+          t.mesh.position.x = pt.x + Math.sin(p * 0.8) * 0.7 + Math.cos(time * 1.8 + i) * 0.25;
+          t.mesh.position.y = pt.y + Math.cos(p * 1.2) * 0.55 + Math.sin(time * 2.2 + i) * 0.2;
           t.mesh.position.z = currentZ;
 
-          t.mesh.rotation.x = Math.sin(time * 5.0 + i) * 0.5 + Math.sin(p) * 0.3;
-          t.mesh.rotation.y = Math.cos(time * 4.0 + i * 0.5) * 1.0 + p * 0.2;
-          t.mesh.rotation.z = Math.sin(time * 6.0 + i) * 0.6 + Math.cos(p * 1.5) * 0.5;
+          t.mesh.rotation.x = Math.sin(time * 4.5 + i) * 0.7 + Math.sin(p) * 0.4;
+          t.mesh.rotation.y = Math.cos(time * 3.5 + i * 0.5) * 1.3 + p * 0.3;
+          t.mesh.rotation.z = Math.sin(time * 5.5 + i) * 0.8 + Math.cos(p * 1.5) * 0.7;
 
-          // Subtle natural scale pulse for paper flutter effect
-          const flutter = 1.0 + Math.sin(time * 12.0 + i * 2.0) * 0.08;
-          t.mesh.scale.set(flutter, 1.0 / flutter, 1.0);
+          // Realistic organic paper flutter pulse
+          const flutterX = 1.0 + Math.sin(time * 14.0 + i * 2.5) * 0.12;
+          const flutterY = 1.0 + Math.cos(time * 11.0 + i * 1.5) * 0.1;
+          t.mesh.scale.set(flutterX, flutterY, 1.0);
       }
 
       // Door animations
